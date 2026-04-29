@@ -1,5 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+<!-- jsPDF para gerar PDF -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <head>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#c8f135">
@@ -1414,28 +1416,109 @@ function clearWeekConfirm() {
 function shareWorkout() {
   const id = document.getElementById('treino-student-sel').value;
   if (!id) { alert('Selecione um aluno'); return; }
+  
   const week = document.getElementById('treino-week-sel').value;
   const proto = db.protocols[id]?.[week];
   if (!proto) { alert('Protocolo vazio'); return; }
-  const s = db.students.find(s=>s.id===id);
-  let text = `*Protocolo de Treino - ${s.nome}*\nSemana ${week}\n\n`;
-  DAYS.forEach((d,i) => {
-    const exs = proto[d]||[];
-    if (!exs.length) return;
-    text += `*${DAYS_FULL[i]}*\n`;
-    exs.forEach(ex => {
-      text += `- ${ex.nome}: ${ex.series}x${ex.reps}${ex.carga?' ('+ex.carga+'kg)':''}\n`;
-      if (ex.techs && ex.techs.length) text += `  Tecnicas: ${ex.techs.join(', ')}\n`;
-      if (ex.obs) text += `  Obs: ${ex.obs}\n`;
-    });
-    text += '\n';
+
+  const student = db.students.find(s => s.id === id);
+  const studentName = student ? student.nome : 'Aluno';
+
+  // Gerar PDF
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4"
   });
-  if (s && s.tel) {
-    const phone = s.tel.replace(/\D/g,'');
-    window.open(`https://wa.me/55${phone}?text=${encodeURIComponent(text)}`,'_blank');
-  } else {
-    navigator.clipboard.writeText(text).then(()=>alert('Protocolo copiado! Cole no WhatsApp.')).catch(()=>alert(text));
-  }
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const accent = '#c8f135';
+  const dark = '#0a0a0a';
+  const gray = '#aaaaaa';
+
+  // Cabeçalho
+  doc.setFillColor(dark);
+  doc.rect(0, 0, pageWidth, 35, 'F');
+  
+  doc.setTextColor(accent);
+  doc.setFontSize(22);
+  doc.setFont("helvetica", "bold");
+  doc.text("SPANCERSKITEAM", pageWidth/2, 18, { align: "center" });
+
+  doc.setFontSize(12);
+  doc.setTextColor(gray);
+  doc.text("GESTÃO DE ALUNOS • PROTOCOLO DE TREINO", pageWidth/2, 26, { align: "center" });
+
+  // Informações do aluno
+  doc.setFontSize(14);
+  doc.setTextColor(accent);
+  doc.text(`Aluno: ${studentName}`, 20, 50);
+
+  doc.setFontSize(12);
+  doc.setTextColor(gray);
+  doc.text(`Semana ${week} • ${new Date().toLocaleDateString('pt-BR')}`, 20, 58);
+
+  let y = 75;
+
+  DAYS.forEach((day, i) => {
+    const exercises = proto[day] || [];
+    if (exercises.length === 0) return;
+
+    // Dia
+    doc.setFillColor('#1a1a1a');
+    doc.rect(15, y, pageWidth - 30, 10, 'F');
+    
+    doc.setTextColor(accent);
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bold");
+    doc.text(DAYS_FULL[i].toUpperCase(), 20, y + 7);
+
+    y += 15;
+
+    exercises.forEach((ex, idx) => {
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(11);
+      doc.text(`${ex.series}x${ex.reps} - ${ex.nome}`, 20, y);
+
+      if (ex.carga) {
+        doc.setTextColor(accent);
+        doc.text(`${ex.carga}kg`, pageWidth - 40, y, { align: "right" });
+      }
+
+      if (ex.techs && ex.techs.length) {
+        doc.setFontSize(9);
+        doc.setTextColor(gray);
+        doc.text(ex.techs.join(" • "), 25, y + 6);
+        y += 6;
+      }
+
+      if (ex.obs) {
+        doc.setFontSize(9);
+        doc.setTextColor(gray);
+        doc.text(ex.obs, 25, y + 6);
+        y += 6;
+      }
+
+      y += 10;
+
+      // Linha separadora
+      if (idx < exercises.length - 1) {
+        doc.setDrawColor(50, 50, 50);
+        doc.line(20, y - 3, pageWidth - 20, y - 3);
+      }
+    });
+
+    y += 12;
+  });
+
+  // Rodapé
+  doc.setFontSize(10);
+  doc.setTextColor(gray);
+  doc.text("SpancerskiTeam • v1.0", pageWidth/2, 280, { align: "center" });
+
+  // Baixar PDF
+  doc.save(`Protocolo_${studentName.replace(/ /g,'_')}_Semana${week}.pdf`);
 }
 
 // ====== FOTOS ======
