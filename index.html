@@ -1424,100 +1424,114 @@ function shareWorkout() {
   const student = db.students.find(s => s.id === id);
   const studentName = student ? student.nome : 'Aluno';
 
-  // Gerar PDF
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({
-    orientation: "portrait",
-    unit: "mm",
-    format: "a4"
-  });
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
   const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
   const accent = '#c8f135';
   const dark = '#0a0a0a';
-  const gray = '#aaaaaa';
+  const lightGray = '#cccccc';
+  const gray = '#888888';
+
+  // Fundo preto completo
+  doc.setFillColor(dark);
+  doc.rect(0, 0, pageWidth, pageHeight, 'F');
 
   // Cabeçalho
-  doc.setFillColor(dark);
-  doc.rect(0, 0, pageWidth, 35, 'F');
-  
+  doc.setFillColor('#111111');
+  doc.rect(0, 0, pageWidth, 45, 'F');
   doc.setTextColor(accent);
-  doc.setFontSize(22);
+  doc.setFontSize(26);
   doc.setFont("helvetica", "bold");
-  doc.text("SPANCERSKITEAM", pageWidth/2, 18, { align: "center" });
-
+  doc.text("SPANCERSKITEAM", pageWidth/2, 22, { align: "center" });
   doc.setFontSize(12);
-  doc.setTextColor(gray);
-  doc.text("GESTÃO DE ALUNOS • PROTOCOLO DE TREINO", pageWidth/2, 26, { align: "center" });
+  doc.setTextColor(lightGray);
+  doc.text("GESTÃO DE ALUNOS • PROTOCOLO DE TREINO", pageWidth/2, 32, { align: "center" });
 
-  // Informações do aluno
-  doc.setFontSize(14);
+  // Dados do aluno
+  doc.setFontSize(15);
   doc.setTextColor(accent);
-  doc.text(`Aluno: ${studentName}`, 20, 50);
+  doc.text(`Aluno: ${studentName}`, 20, 58);
 
-  doc.setFontSize(12);
-  doc.setTextColor(gray);
-  doc.text(`Semana ${week} • ${new Date().toLocaleDateString('pt-BR')}`, 20, 58);
+  doc.setFontSize(11);
+  doc.setTextColor(lightGray);
+  doc.text(`Semana ${week} • ${new Date().toLocaleDateString('pt-BR')}`, 20, 67);
 
-  let y = 75;
+  let y = 82;
 
   DAYS.forEach((day, i) => {
     const exercises = proto[day] || [];
     if (exercises.length === 0) return;
 
-    // Dia
+    // Título do dia
     doc.setFillColor('#1a1a1a');
-    doc.rect(15, y, pageWidth - 30, 10, 'F');
-    
+    doc.rect(15, y, pageWidth - 30, 14, 'F');
     doc.setTextColor(accent);
-    doc.setFontSize(13);
+    doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
-    doc.text(DAYS_FULL[i].toUpperCase(), 20, y + 7);
-
-    y += 15;
+    doc.text(DAYS_FULL[i].toUpperCase(), 20, y + 9);
+    y += 22;
 
     exercises.forEach((ex, idx) => {
+      // Nome do exercício
       doc.setTextColor(255, 255, 255);
-      doc.setFontSize(11);
-      doc.text(`${ex.series}x${ex.reps} - ${ex.nome}`, 20, y);
+      doc.setFontSize(13);
+      doc.setFont("helvetica", "bold");
+      doc.text(ex.nome, 20, y);
 
-      if (ex.carga) {
+      // Séries e Reps
+      doc.setFontSize(12);
+      doc.setTextColor(accent);
+      doc.text(`${ex.series} séries × ${ex.reps}`, pageWidth - 70, y, { align: "right" });
+
+      y += 7;
+
+      // Carga + Descanso
+      let info = [];
+      if (ex.carga) info.push(`${ex.carga} kg`);
+      if (ex.descanso) info.push(`${ex.descanso}s descanso`);
+      if (info.length) {
+        doc.setFontSize(10);
+        doc.setTextColor(lightGray);
+        doc.text(info.join(" • "), 25, y);
+        y += 6;
+      }
+
+      // Técnicas
+      if (ex.techs && ex.techs.length > 0) {
+        doc.setFontSize(10);
         doc.setTextColor(accent);
-        doc.text(`${ex.carga}kg`, pageWidth - 40, y, { align: "right" });
-      }
-
-      if (ex.techs && ex.techs.length) {
-        doc.setFontSize(9);
-        doc.setTextColor(gray);
-        doc.text(ex.techs.join(" • "), 25, y + 6);
+        doc.text(`Técnicas: ${ex.techs.join(" • ")}`, 25, y);
         y += 6;
       }
 
-      if (ex.obs) {
-        doc.setFontSize(9);
+      // Observação
+      if (ex.obs && ex.obs.trim() !== '') {
+        doc.setFontSize(10);
         doc.setTextColor(gray);
-        doc.text(ex.obs, 25, y + 6);
-        y += 6;
+        doc.text(ex.obs, 25, y);
+        y += 7;
       }
 
-      y += 10;
+      y += 11;
 
       // Linha separadora
       if (idx < exercises.length - 1) {
-        doc.setDrawColor(50, 50, 50);
-        doc.line(20, y - 3, pageWidth - 20, y - 3);
+        doc.setDrawColor(60, 60, 60);
+        doc.line(20, y - 6, pageWidth - 20, y - 6);
       }
     });
 
-    y += 12;
+    y += 18;
   });
 
   // Rodapé
   doc.setFontSize(10);
   doc.setTextColor(gray);
-  doc.text("SpancerskiTeam • v1.0", pageWidth/2, 280, { align: "center" });
+  doc.text("SpancerskiTeam • v1.0", pageWidth/2, 285, { align: "center" });
 
-  // Baixar PDF
+  // Download
   doc.save(`Protocolo_${studentName.replace(/ /g,'_')}_Semana${week}.pdf`);
 }
 
