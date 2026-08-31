@@ -161,6 +161,25 @@ a { color: var(--accent); }
 
 .btn-novo-aluno:hover { background: var(--accent-2); box-shadow: 0 0 18px rgba(57,255,106,0.35); }
 
+.btn-novo-aluno.secundario {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  margin-top: -8px;
+}
+
+.btn-novo-aluno.secundario:hover {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  box-shadow: none;
+}
+
+.btn-novo-aluno.secundario.ativo {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 14px rgba(57,255,106,0.2);
+}
+
 /* Luminescência sutil em botões primários (ação de destaque) */
 .btn-novo-aluno,
 .btn-confirmar,
@@ -259,6 +278,83 @@ a { color: var(--accent); }
   font-size: 22px;
   margin: 0;
 }
+
+/* Visão geral (tela inicial, sem aluno selecionado) */
+
+.visao-geral { max-width: 860px; }
+
+.boas-vindas h1 {
+  font-family: var(--font-display);
+  font-size: 30px;
+  margin: 0 0 6px 0;
+  text-shadow: 0 0 18px rgba(57,255,106,0.18);
+}
+
+.boas-vindas p {
+  color: var(--text-muted);
+  margin: 0 0 28px 0;
+  font-size: 14px;
+}
+
+.grid-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.acesso-rapido {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 32px;
+}
+
+.secao-recentes h3 {
+  font-family: var(--font-display);
+  font-size: 15px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 12px 0;
+}
+
+.lista-recentes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.item-recente {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.item-recente:hover { border-color: var(--accent); }
+
+.avatar-inicial {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.info-recente { flex: 1; min-width: 0; }
+.info-recente .nome { font-weight: 600; font-size: 14px; }
+.info-recente .sub { color: var(--text-muted); font-size: 12px; }
 
 .cabecalho-aluno {
   display: flex;
@@ -1602,6 +1698,16 @@ a { color: var(--accent); }
   font-weight: 800;
   flex-shrink: 0;
 }
+
+.link-buscar-youtube {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.link-buscar-youtube:hover { color: var(--accent-2); text-decoration: underline; }
 
 .remover-catalogo {
   position: absolute;

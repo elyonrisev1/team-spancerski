@@ -28,7 +28,8 @@ const estado = {
   buscaCatalogo: '',
   grupoCatalogoAtivo: 'Todos',
   buscaImportacao: '',
-  resultadosImportacao: []
+  resultadosImportacao: [],
+  telaGlobal: null // null | 'videos' — quando 'videos', mostra o Banco de vídeos sem precisar de um aluno selecionado
 };
 
 function iniciarDashboard() {
@@ -59,20 +60,35 @@ function renderizarRail() {
   }
 
   lista.innerHTML = filtrados.map(a => `
-    <div class="item-aluno-rail ${a.id === estado.alunoSelecionadoId ? 'ativo' : ''}" onclick="selecionarAluno('${a.id}')">
+    <div class="item-aluno-rail ${a.id === estado.alunoSelecionadoId && !estado.telaGlobal ? 'ativo' : ''}" onclick="selecionarAluno('${a.id}')">
       <div class="nome">${a.nome}</div>
       <div class="status-dot ${a.status === 'Ativo' ? '' : 'inativo'}"></div>
     </div>
   `).join('');
+
+  const btnVideosNav = document.getElementById('btnBancoVideosNav');
+  if (btnVideosNav) btnVideosNav.classList.toggle('ativo', estado.telaGlobal === 'videos');
 }
 
 function selecionarAluno(alunoId) {
+  estado.telaGlobal = null;
   estado.alunoSelecionadoId = alunoId;
   estado.aba = 'protocolo';
   estado.diaAtivo = DIAS_SEMANA[0];
   estado.tecnicasSelecionadas = [];
   renderizarRail();
   carregarDadosDoAluno(alunoId);
+}
+
+/**
+ * Abre o Banco de vídeos como tela própria, sem precisar selecionar um aluno —
+ * o catálogo é global e compartilhado entre todos os alunos.
+ */
+function abrirBancoVideosGlobal() {
+  estado.telaGlobal = 'videos';
+  estado.alunoSelecionadoId = null;
+  renderizarRail();
+  renderizarPainel();
 }
 
 function carregarDadosDoAluno(alunoId) {
@@ -98,15 +114,25 @@ function carregarDadosDoAluno(alunoId) {
 
 function renderizarPainel() {
   const painel = document.getElementById('painel');
+
+  // Tela global do Banco de vídeos (não depende de aluno selecionado)
+  if (estado.telaGlobal === 'videos') {
+    painel.innerHTML = `
+      <div class="cabecalho-aluno">
+        <div>
+          <h1>Banco de vídeos</h1>
+          <div class="meta-aluno"><span>Catálogo global — os vídeos cadastrados aqui valem para todos os alunos</span></div>
+        </div>
+      </div>
+      <div id="conteudoAba">${htmlAbaVideos()}</div>
+    `;
+    return;
+  }
+
   const aluno = estado.alunos.find(a => a.id === estado.alunoSelecionadoId);
 
   if (!aluno) {
-    painel.innerHTML = `
-      <div class="painel-vazio">
-        <h2>Selecione um aluno</h2>
-        <p>Ou cadastre um novo aluno para começar a montar o treino.</p>
-      </div>
-    `;
+    painel.innerHTML = htmlVisaoGeral();
     return;
   }
 
@@ -142,6 +168,80 @@ function renderizarPainel() {
   `;
 
   renderizarConteudoAba();
+}
+
+/**
+ * Tela inicial (nenhum aluno selecionado): visão geral do negócio, com KPIs
+ * rápidos e os últimos alunos cadastrados — substitui o antigo aviso
+ * genérico "Selecione um aluno" por algo útil ao abrir o dashboard.
+ */
+function htmlVisaoGeral() {
+  const total = estado.alunos.length;
+  const ativos = estado.alunos.filter(a => a.status === 'Ativo').length;
+  const inativos = total - ativos;
+  const receitaPrevista = estado.alunos
+    .filter(a => a.status === 'Ativo')
+    .reduce((soma, a) => soma + (parseFloat(a.mensalidade) || 0), 0);
+
+  const recentes = [...estado.alunos]
+    .sort((a, b) => new Date(b.dataCadastro || 0) - new Date(a.dataCadastro || 0))
+    .slice(0, 5);
+
+  return `
+    <div class="visao-geral">
+      <div class="boas-vindas">
+        <h1>Visão geral</h1>
+        <p>Selecione um aluno na lista ao lado para montar o treino, ou comece por aqui.</p>
+      </div>
+
+      <div class="grid-kpis">
+        <div class="stat-card">
+          <div class="label">Alunos ativos</div>
+          <div class="valor">${ativos}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Alunos inativos</div>
+          <div class="valor">${inativos}</div>
+        </div>
+        <div class="stat-card pago">
+          <div class="label">Receita mensal prevista</div>
+          <div class="valor">R$ ${receitaPrevista.toFixed(2)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Total de alunos</div>
+          <div class="valor">${total}</div>
+        </div>
+      </div>
+
+      <div class="acesso-rapido">
+        <button class="btn-acao primario" onclick="abrirModalNovoAluno()">+ Novo aluno</button>
+        <button class="btn-acao" onclick="abrirBancoVideosGlobal()">🎬 Banco de vídeos</button>
+      </div>
+
+      ${recentes.length ? `
+      <div class="secao-recentes">
+        <h3>Últimos alunos cadastrados</h3>
+        <div class="lista-recentes">
+          ${recentes.map(a => `
+            <div class="item-recente" onclick="selecionarAluno('${a.id}')">
+              <div class="avatar-inicial">${(a.nome || '?').trim().charAt(0).toUpperCase()}</div>
+              <div class="info-recente">
+                <div class="nome">${a.nome}</div>
+                <div class="sub">${a.objetivo || 'Sem objetivo definido'}</div>
+              </div>
+              <div class="status-dot ${a.status === 'Ativo' ? '' : 'inativo'}"></div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      ` : `
+      <div class="painel-vazio" style="height:auto; padding:48px 0 0;">
+        <h2>Nenhum aluno cadastrado ainda</h2>
+        <p>Clique em "+ Novo aluno" para começar.</p>
+      </div>
+      `}
+    </div>
+  `;
 }
 
 function trocarAba(aba) {
@@ -781,7 +881,7 @@ function htmlAbaVideos() {
 
   return `
     <div class="cabecalho-videos">
-      <p class="explicacao">Cole o link do YouTube (ou Vimeo) de cada exercício uma única vez. A partir daí, todo aluno que tiver esse exercício no protocolo já verá o botão "Ver vídeo" automaticamente — o nome do exercício no protocolo precisa ser igual (ou bem parecido) ao nome cadastrado aqui.</p>
+      <p class="explicacao">Cole o link do YouTube (ou Vimeo) de cada exercício uma única vez. A partir daí, todo aluno que tiver esse exercício no protocolo já verá o botão "Ver vídeo" automaticamente — o nome do exercício no protocolo precisa ser igual (ou bem parecido) ao nome cadastrado aqui. Sem link salvo ainda, use o botão "Buscar vídeo pronto no YouTube" em cada card para achar um vídeo rapidamente.</p>
     </div>
 
     <div class="painel-importacao">
@@ -882,6 +982,7 @@ function htmlCardCatalogo(item) {
           <input type="text" name="videoUrl" placeholder="Colar link do vídeo (YouTube/Vimeo)" value="${item.videoUrl || ''}" />
           <button type="submit" title="Salvar link">✓</button>
         </form>
+        <a class="link-buscar-youtube" href="https://www.youtube.com/results?search_query=${encodeURIComponent(item.nome + ' execução técnica')}" target="_blank" rel="noopener">🔎 Buscar vídeo pronto no YouTube</a>
       </div>
       <button class="remover-catalogo" onclick="removerExercicioCatalogo('${item.id}')" title="Remover exercício">✕</button>
     </div>
