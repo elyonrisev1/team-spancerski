@@ -963,6 +963,87 @@ class GerenciadorTreinador {
     });
   }
 
+  // ========== IMPORTAÇÃO DO free-exercise-db (banco gratuito, sem chave de API) ==========
+  // https://github.com/yuhonas/free-exercise-db — domínio público (Unlicense).
+  // Só tem imagens (2 fotos por exercício), não tem vídeo — mas é 100% grátis e sem cadastro.
+
+  /**
+   * Traduz o campo primaryMuscles (inglês) do free-exercise-db para os
+   * grupos musculares em português usados no nosso catálogo.
+   */
+  _mapearGrupoMuscular(primaryMuscles) {
+    const musculo = (primaryMuscles && primaryMuscles[0] || '').toLowerCase();
+    const mapa = {
+      chest: 'Peito',
+      lats: 'Costas', 'middle back': 'Costas', 'lower back': 'Costas', traps: 'Costas',
+      shoulders: 'Ombro',
+      biceps: 'Bíceps',
+      triceps: 'Tríceps',
+      forearms: 'Antebraço',
+      quadriceps: 'Pernas', hamstrings: 'Pernas', adductors: 'Pernas', abductors: 'Pernas',
+      glutes: 'Glúteos',
+      calves: 'Panturrilha',
+      abdominals: 'Abdômen',
+      neck: 'Pescoço'
+    };
+    return mapa[musculo] || 'Cardio / Mobilidade';
+  }
+
+  /**
+   * Baixa (uma vez, e guarda em cache na memória) o dataset completo do
+   * free-exercise-db direto do GitHub — não precisa de API key nem backend.
+   */
+  _carregarFreeExerciseDB() {
+    if (this._cacheFreeExerciseDB) return Promise.resolve(this._cacheFreeExerciseDB);
+
+    return fetch('https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json')
+      .then(r => r.json())
+      .then(lista => {
+        this._cacheFreeExerciseDB = lista;
+        return lista;
+      });
+  }
+
+  /**
+   * Busca no free-exercise-db por nome ou grupo muscular (em inglês — o dataset
+   * original é em inglês) e devolve até 30 resultados já no formato do nosso catálogo.
+   */
+  buscarFreeExerciseDB(termo) {
+    return this._carregarFreeExerciseDB().then(lista => {
+      const alvo = (termo || '').toLowerCase().trim();
+      const filtrados = !alvo ? lista.slice(0, 30) : lista.filter(ex =>
+        ex.name.toLowerCase().includes(alvo) ||
+        (ex.primaryMuscles || []).some(m => m.toLowerCase().includes(alvo)) ||
+        (ex.category || '').toLowerCase().includes(alvo)
+      ).slice(0, 30);
+
+      return filtrados.map(ex => ({
+        nome: ex.name,
+        grupoMuscular: this._mapearGrupoMuscular(ex.primaryMuscles),
+        imagens: (ex.images || []).map(caminho => `https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/${caminho}`),
+        instrucoesOriginais: ex.instructions || []
+      }));
+    });
+  }
+
+  /**
+   * Adiciona ao catálogo do Firebase um exercício vindo do free-exercise-db.
+   * O vídeo fica vazio — o treinador cola o link do YouTube depois, se quiser;
+   * enquanto isso, o aluno já vê as fotos de referência do movimento.
+   */
+  importarExercicioFreeDB(item) {
+    const id = 'cat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+    const registro = {
+      id,
+      nome: item.nome,
+      grupoMuscular: item.grupoMuscular,
+      videoUrl: '',
+      imagens: item.imagens || [],
+      fonte: 'free-exercise-db'
+    };
+    return this.db.ref('catalogoExercicios/' + id).set(registro).then(() => registro);
+  }
+
   info() {
     console.log('=== SPANCERSKI TRAINER ===');
     console.log('Firebase Database:', firebase.database().ref().toString());

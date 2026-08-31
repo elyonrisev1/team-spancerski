@@ -1654,6 +1654,67 @@ a { color: var(--accent); }
   margin-top: 4px;
 }
 
+/* Importação do free-exercise-db (banco público, sem chave de API) */
+
+.painel-importacao {
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 22px;
+}
+
+.painel-importacao h3 {
+  font-family: var(--font-display);
+  font-size: 15px;
+  margin: 0 0 4px 0;
+}
+
+.linha-importacao { margin: 12px 0; }
+
+.grid-importacao {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.card-importacao {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.card-importacao img {
+  width: 100%;
+  aspect-ratio: 4/3;
+  object-fit: contain;
+  background: #fff;
+  display: block;
+}
+
+.info-importacao { padding: 10px 12px 12px; }
+
+.galeria-imagens-exercicio,
+.referencia-imagens {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.galeria-imagens-exercicio img,
+.referencia-imagens img {
+  border-radius: var(--radius-sm);
+  background: #fff;
+  object-fit: contain;
+  border: 1px solid var(--border);
+}
+
+.referencia-imagens img { width: 90px; height: 90px; }
+.galeria-imagens-exercicio img { flex: 1; max-height: 320px; }
+
 @media (max-width: 860px) {
   .app-treinador { grid-template-columns: 1fr; }
   .rail {

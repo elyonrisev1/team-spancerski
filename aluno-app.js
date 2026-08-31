@@ -69,14 +69,36 @@ class AppAluno {
 
   /**
    * Procura no catálogo global um exercício com nome igual (ignorando maiúsculas/
-   * acentos/espaços extras) ao exercício do protocolo, e devolve o link do vídeo
-   * cadastrado pelo treinador, se houver.
+   * acentos/espaços extras) ao exercício do protocolo, e devolve o item completo
+   * do catálogo (com videoUrl e/ou imagens de referência), se houver.
    */
-  buscarVideoDoExercicio(nomeExercicio) {
+  buscarItemCatalogo(nomeExercicio) {
     const normalizar = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
     const alvo = normalizar(nomeExercicio);
-    const item = this.catalogoVideos.find(c => normalizar(c.nome) === alvo);
+    return this.catalogoVideos.find(c => normalizar(c.nome) === alvo) || null;
+  }
+
+  buscarVideoDoExercicio(nomeExercicio) {
+    const item = this.buscarItemCatalogo(nomeExercicio);
     return (item && item.videoUrl) ? item.videoUrl : null;
+  }
+
+  /**
+   * Mostra, abaixo do nome do exercício, o botão de vídeo (se o treinador já colou
+   * um link) e/ou as fotos de referência do movimento (importadas do free-exercise-db),
+   * para o aluno sempre ter algum apoio visual, mesmo antes de existir um vídeo.
+   */
+  renderizarReferenciaExercicio(nomeExercicio) {
+    const item = this.buscarItemCatalogo(nomeExercicio);
+    if (!item) return '';
+
+    let html = '';
+    if (item.videoUrl) {
+      html += `<button class="btn-ver-video" onclick="appAluno.abrirVideoExercicio('${nomeExercicio.replace(/'/g, "\\'")}')">▶ Ver vídeo do exercício</button>`;
+    } else if (item.imagens && item.imagens.length) {
+      html += `<div class="referencia-imagens">${item.imagens.slice(0, 2).map(src => `<img src="${src}" alt="Referência: ${nomeExercicio}" />`).join('')}</div>`;
+    }
+    return html;
   }
 
   urlEmbedVideo(url) {
@@ -188,7 +210,7 @@ class AppAluno {
 
         <div class="nome-exercicio">
           <h2>${ex.nome}</h2>
-          ${this.buscarVideoDoExercicio(ex.nome) ? `<button class="btn-ver-video" onclick="appAluno.abrirVideoExercicio('${ex.nome.replace(/'/g, "\\'")}')">▶ Ver vídeo do exercício</button>` : ''}
+          ${this.renderizarReferenciaExercicio(ex.nome)}
         </div>
 
         <div class="detalhes-exercicio">

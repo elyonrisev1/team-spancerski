@@ -26,7 +26,9 @@ const estado = {
   fotos: [],
   catalogo: [],
   buscaCatalogo: '',
-  grupoCatalogoAtivo: 'Todos'
+  grupoCatalogoAtivo: 'Todos',
+  buscaImportacao: '',
+  resultadosImportacao: []
 };
 
 function iniciarDashboard() {
@@ -782,6 +784,15 @@ function htmlAbaVideos() {
       <p class="explicacao">Cole o link do YouTube (ou Vimeo) de cada exercício uma única vez. A partir daí, todo aluno que tiver esse exercício no protocolo já verá o botão "Ver vídeo" automaticamente — o nome do exercício no protocolo precisa ser igual (ou bem parecido) ao nome cadastrado aqui.</p>
     </div>
 
+    <div class="painel-importacao">
+      <h3>Importar exercícios prontos (free-exercise-db — grátis, sem cadastro)</h3>
+      <p class="explicacao">Banco público com 800+ exercícios e fotos de referência do movimento (em inglês). Importe os que quiser — o vídeo continua ficando por sua conta, mas o aluno já vê a foto de referência mesmo antes disso.</p>
+      <div class="linha-importacao">
+        <input type="text" class="busca-aluno" placeholder="Buscar em inglês (ex: squat, bench press, curl...)" value="${estado.buscaImportacao}" oninput="buscarImportacaoFreeDB(this.value)" />
+      </div>
+      <div class="resultados-importacao">${htmlResultadosImportacao()}</div>
+    </div>
+
     <input type="text" class="busca-aluno" style="margin-bottom:14px; width:100%; max-width:360px;" placeholder="Buscar exercício no catálogo..." value="${estado.buscaCatalogo}" oninput="buscarCatalogo(this.value)" />
 
     <div class="dias-semana">${pillsGrupo}</div>
@@ -802,16 +813,65 @@ function htmlAbaVideos() {
   `;
 }
 
+function htmlResultadosImportacao() {
+  if (!estado.resultadosImportacao.length) {
+    return estado.buscaImportacao
+      ? `<p style="color:var(--text-muted); font-size:12px;">Nenhum resultado. Tente em inglês (squat, curl, press, row...).</p>`
+      : '';
+  }
+  return `<div class="grid-importacao">${estado.resultadosImportacao.map((item, i) => `
+    <div class="card-importacao">
+      ${item.imagens[0] ? `<img src="${item.imagens[0]}" alt="${item.nome}" />` : '<div class="thumb-vazia">Sem foto</div>'}
+      <div class="info-importacao">
+        <div class="grupo-catalogo">${item.grupoMuscular}</div>
+        <div class="nome-catalogo">${item.nome}</div>
+        <button class="btn-add-ex" style="width:100%;" onclick="importarExercicioFreeDB(${i})">+ Importar</button>
+      </div>
+    </div>
+  `).join('')}</div>`;
+}
+
+let _debounceImportacao = null;
+function buscarImportacaoFreeDB(valor) {
+  estado.buscaImportacao = valor;
+  clearTimeout(_debounceImportacao);
+  _debounceImportacao = setTimeout(() => {
+    trainer.buscarFreeExerciseDB(valor).then((resultados) => {
+      estado.resultadosImportacao = resultados;
+      const container = document.querySelector('.resultados-importacao');
+      if (container) container.innerHTML = htmlResultadosImportacao();
+    }).catch(() => {
+      const container = document.querySelector('.resultados-importacao');
+      if (container) container.innerHTML = `<p style="color:var(--danger); font-size:12px;">Não foi possível buscar agora. Verifique sua conexão.</p>`;
+    });
+  }, 400);
+}
+
+function importarExercicioFreeDB(indice) {
+  const item = estado.resultadosImportacao[indice];
+  if (!item) return;
+
+  trainer.importarExercicioFreeDB(item).then((registro) => {
+    estado.catalogo.push(registro);
+    estado.catalogo.sort((a, b) => (a.grupoMuscular || '').localeCompare(b.grupoMuscular || '') || a.nome.localeCompare(b.nome));
+    renderizarConteudoAba();
+  });
+}
+
 function htmlCardCatalogo(item) {
   const idYoutube = trainer.extrairIdYoutube(item.videoUrl);
-  const thumb = idYoutube ? `https://img.youtube.com/vi/${idYoutube}/mqdefault.jpg` : null;
+  const thumbVideo = idYoutube ? `https://img.youtube.com/vi/${idYoutube}/mqdefault.jpg` : null;
+  const thumbImagem = (!thumbVideo && item.imagens && item.imagens[0]) ? item.imagens[0] : null;
+  const temPreview = !!(item.videoUrl || thumbImagem);
 
   return `
     <div class="card-catalogo">
-      <div class="thumb-catalogo" ${item.videoUrl ? `onclick="abrirPreviewVideo('${item.id}')" style="cursor:pointer;"` : ''}>
-        ${thumb
-          ? `<img src="${thumb}" alt="${item.nome}" />`
-          : `<div class="thumb-vazia">${item.videoUrl ? '🎬' : 'Sem vídeo'}</div>`
+      <div class="thumb-catalogo" ${temPreview ? `onclick="abrirPreviewVideo('${item.id}')" style="cursor:pointer;"` : ''}>
+        ${thumbVideo
+          ? `<img src="${thumbVideo}" alt="${item.nome}" />`
+          : thumbImagem
+            ? `<img src="${thumbImagem}" alt="${item.nome}" />`
+            : `<div class="thumb-vazia">Sem vídeo</div>`
         }
         ${item.videoUrl ? '<div class="play-overlay">▶</div>' : ''}
       </div>
@@ -877,16 +937,23 @@ function removerExercicioCatalogo(id) {
 
 function abrirPreviewVideo(id) {
   const item = estado.catalogo.find(c => c.id === id);
-  if (!item || !item.videoUrl) return;
-  const embed = trainer.urlEmbedVideo(item.videoUrl);
+  if (!item) return;
+
+  let conteudo;
+  if (item.videoUrl) {
+    const embed = trainer.urlEmbedVideo(item.videoUrl);
+    conteudo = `<div class="video-wrapper"><iframe src="${embed}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`;
+  } else if (item.imagens && item.imagens.length) {
+    conteudo = `<div class="galeria-imagens-exercicio">${item.imagens.map(src => `<img src="${src}" alt="${item.nome}" />`).join('')}</div>`;
+  } else {
+    return;
+  }
 
   const html = `
     <div class="overlay-modal" id="overlayPreviewVideo" onclick="if(event.target===this) fecharPreviewVideo()">
       <div class="modal modal-video">
         <h2>${item.nome}</h2>
-        <div class="video-wrapper">
-          <iframe src="${embed}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-        </div>
+        ${conteudo}
         <div class="modal-acoes">
           <button type="button" class="btn-cancelar" onclick="fecharPreviewVideo()">Fechar</button>
         </div>
