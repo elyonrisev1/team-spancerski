@@ -29,6 +29,8 @@ const estado = {
   grupoCatalogoAtivo: 'Todos',
   buscaImportacao: '',
   resultadosImportacao: [],
+  buscaImportacaoEDB: '',
+  resultadosImportacaoEDB: [],
   telaGlobal: null // null | 'videos' — quando 'videos', mostra o Banco de vídeos sem precisar de um aluno selecionado
 };
 
@@ -893,6 +895,15 @@ function htmlAbaVideos() {
       <div class="resultados-importacao">${htmlResultadosImportacao()}</div>
     </div>
 
+    <div class="painel-importacao">
+      <h3>Importar do ExerciseDB grátis (GIF animado do movimento, sem cadastro)</h3>
+      <p class="explicacao">Camada gratuita e sem chave de API do banco ExerciseDB (1.500 exercícios, em inglês). Diferente do banco acima, aqui cada exercício já vem com um <strong>GIF animado</strong> mostrando o movimento — o mais perto de um vídeo pronto que existe hoje sem pagar. É um serviço de terceiros: se um dia sair do ar, os exercícios já importados continuam salvos normalmente.</p>
+      <div class="linha-importacao">
+        <input type="text" class="busca-aluno" placeholder="Buscar em inglês (ex: squat, bench press, curl...)" value="${estado.buscaImportacaoEDB}" oninput="buscarImportacaoEDB(this.value)" />
+      </div>
+      <div class="resultados-importacao-edb">${htmlResultadosImportacaoEDB()}</div>
+    </div>
+
     <input type="text" class="busca-aluno" style="margin-bottom:14px; width:100%; max-width:360px;" placeholder="Buscar exercício no catálogo..." value="${estado.buscaCatalogo}" oninput="buscarCatalogo(this.value)" />
 
     <div class="dias-semana">${pillsGrupo}</div>
@@ -958,20 +969,70 @@ function importarExercicioFreeDB(indice) {
   });
 }
 
+// ---------- Importação do ExerciseDB grátis (GIF animado) ----------
+
+function htmlResultadosImportacaoEDB() {
+  if (!estado.resultadosImportacaoEDB.length) {
+    return estado.buscaImportacaoEDB
+      ? `<p style="color:var(--text-muted); font-size:12px;">Nenhum resultado. Tente em inglês (squat, curl, press, row...).</p>`
+      : '';
+  }
+  return `<div class="grid-importacao">${estado.resultadosImportacaoEDB.map((item, i) => `
+    <div class="card-importacao">
+      ${item.gifUrl ? `<img src="${item.gifUrl}" alt="${item.nome}" loading="lazy" />` : '<div class="thumb-vazia">Sem GIF</div>'}
+      <div class="info-importacao">
+        <div class="grupo-catalogo">${item.grupoMuscular}</div>
+        <div class="nome-catalogo">${item.nome}</div>
+        <button class="btn-add-ex" style="width:100%;" onclick="importarExercicioEDB(${i})">+ Importar</button>
+      </div>
+    </div>
+  `).join('')}</div>`;
+}
+
+let _debounceImportacaoEDB = null;
+function buscarImportacaoEDB(valor) {
+  estado.buscaImportacaoEDB = valor;
+  clearTimeout(_debounceImportacaoEDB);
+  _debounceImportacaoEDB = setTimeout(() => {
+    trainer.buscarExerciseDBGratis(valor).then((resultados) => {
+      estado.resultadosImportacaoEDB = resultados;
+      const container = document.querySelector('.resultados-importacao-edb');
+      if (container) container.innerHTML = htmlResultadosImportacaoEDB();
+    }).catch(() => {
+      const container = document.querySelector('.resultados-importacao-edb');
+      if (container) container.innerHTML = `<p style="color:var(--danger); font-size:12px;">Não foi possível buscar agora (o serviço gratuito pode estar fora do ar). Tente de novo em instantes.</p>`;
+    });
+  }, 400);
+}
+
+function importarExercicioEDB(indice) {
+  const item = estado.resultadosImportacaoEDB[indice];
+  if (!item) return;
+
+  trainer.importarExercicioExerciseDBGratis(item).then((registro) => {
+    estado.catalogo.push(registro);
+    estado.catalogo.sort((a, b) => (a.grupoMuscular || '').localeCompare(b.grupoMuscular || '') || a.nome.localeCompare(b.nome));
+    renderizarConteudoAba();
+  });
+}
+
 function htmlCardCatalogo(item) {
   const idYoutube = trainer.extrairIdYoutube(item.videoUrl);
   const thumbVideo = idYoutube ? `https://img.youtube.com/vi/${idYoutube}/mqdefault.jpg` : null;
-  const thumbImagem = (!thumbVideo && item.imagens && item.imagens[0]) ? item.imagens[0] : null;
-  const temPreview = !!(item.videoUrl || thumbImagem);
+  const thumbGif = (!thumbVideo && item.gifUrl) ? item.gifUrl : null;
+  const thumbImagem = (!thumbVideo && !thumbGif && item.imagens && item.imagens[0]) ? item.imagens[0] : null;
+  const temPreview = !!(item.videoUrl || thumbGif || thumbImagem);
 
   return `
     <div class="card-catalogo">
       <div class="thumb-catalogo" ${temPreview ? `onclick="abrirPreviewVideo('${item.id}')" style="cursor:pointer;"` : ''}>
         ${thumbVideo
           ? `<img src="${thumbVideo}" alt="${item.nome}" />`
-          : thumbImagem
-            ? `<img src="${thumbImagem}" alt="${item.nome}" />`
-            : `<div class="thumb-vazia">Sem vídeo</div>`
+          : thumbGif
+            ? `<img src="${thumbGif}" alt="${item.nome}" loading="lazy" />`
+            : thumbImagem
+              ? `<img src="${thumbImagem}" alt="${item.nome}" />`
+              : `<div class="thumb-vazia">Sem vídeo</div>`
         }
         ${item.videoUrl ? '<div class="play-overlay">▶</div>' : ''}
       </div>
@@ -1044,6 +1105,8 @@ function abrirPreviewVideo(id) {
   if (item.videoUrl) {
     const embed = trainer.urlEmbedVideo(item.videoUrl);
     conteudo = `<div class="video-wrapper"><iframe src="${embed}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`;
+  } else if (item.gifUrl) {
+    conteudo = `<div class="galeria-imagens-exercicio"><img src="${item.gifUrl}" alt="${item.nome}" /></div>`;
   } else if (item.imagens && item.imagens.length) {
     conteudo = `<div class="galeria-imagens-exercicio">${item.imagens.map(src => `<img src="${src}" alt="${item.nome}" />`).join('')}</div>`;
   } else {

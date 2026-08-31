@@ -95,6 +95,8 @@ class AppAluno {
     let html = '';
     if (item.videoUrl) {
       html += `<button class="btn-ver-video" onclick="appAluno.abrirVideoExercicio('${nomeExercicio.replace(/'/g, "\\'")}')">▶ Ver vídeo do exercício</button>`;
+    } else if (item.gifUrl) {
+      html += `<div class="referencia-imagens"><img src="${item.gifUrl}" alt="Referência: ${nomeExercicio}" loading="lazy" /></div>`;
     } else if (item.imagens && item.imagens.length) {
       html += `<div class="referencia-imagens">${item.imagens.slice(0, 2).map(src => `<img src="${src}" alt="Referência: ${nomeExercicio}" />`).join('')}</div>`;
     }

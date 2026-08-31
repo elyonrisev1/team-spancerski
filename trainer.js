@@ -1044,6 +1044,113 @@ class GerenciadorTreinador {
     return this.db.ref('catalogoExercicios/' + id).set(registro).then(() => registro);
   }
 
+  // ========== IMPORTAÇÃO DO ExerciseDB grátis (GIF animado, sem chave) ==========
+  // https://oss.exercisedb.dev — camada gratuita e sem cadastro do mesmo dataset
+  // que hoje é vendido como "ExerciseDB"/RapidAPI. Diferente do free-exercise-db
+  // (só fotos), aqui cada exercício já vem com um GIF animado mostrando o
+  // movimento completo — o mais perto de "vídeo pronto" que existe hoje sem pagar.
+  // Atenção: é um serviço de terceiros fora do nosso controle; se um dia sair do
+  // ar ou virar pago, essa importação para de funcionar (os exercícios já
+  // importados continuam salvos normalmente no seu Firebase).
+
+  /**
+   * Traduz bodyParts/targetMuscles (inglês, formato do ExerciseDB) para os
+   * grupos musculares em português usados no catálogo.
+   */
+  _mapearGrupoMuscularEDB(bodyParts, targetMuscles) {
+    const parte = (bodyParts && bodyParts[0] || '').toLowerCase();
+    const musculo = (targetMuscles && targetMuscles[0] || '').toLowerCase();
+
+    if (parte === 'chest') return 'Peito';
+    if (parte === 'back') return 'Costas';
+    if (parte === 'shoulders') return 'Ombro';
+    if (parte === 'upper arms') {
+      if (musculo.includes('bicep')) return 'Bíceps';
+      if (musculo.includes('tricep')) return 'Tríceps';
+      return 'Bíceps';
+    }
+    if (parte === 'lower arms') return 'Antebraço';
+    if (parte === 'upper legs') {
+      if (musculo.includes('glute')) return 'Glúteos';
+      return 'Pernas';
+    }
+    if (parte === 'lower legs') return 'Panturrilha';
+    if (parte === 'waist') return 'Abdômen';
+    if (parte === 'cardio') return 'Cardio / Mobilidade';
+    if (parte === 'neck') return 'Pescoço';
+    return 'Cardio / Mobilidade';
+  }
+
+  /**
+   * Baixa (paginado, via cursor) e guarda em cache na memória uma amostra do
+   * dataset gratuito do ExerciseDB (oss.exercisedb.dev). O dataset completo
+   * tem 1500 exercícios; para não fazer centenas de chamadas de rede a cada
+   * busca, carregamos algumas páginas na primeira vez e reaproveitamos.
+   */
+  _carregarExerciseDBGratis() {
+    if (this._cacheExerciseDBGratis) return Promise.resolve(this._cacheExerciseDBGratis);
+
+    const BASE = 'https://oss.exercisedb.dev/api/v1/exercises';
+    const MAX_PAGINAS = 40; // ~ até 400 exercícios cobertos na busca
+
+    const buscarPagina = (cursor, acumulado) => {
+      const url = cursor ? `${BASE}?cursor=${encodeURIComponent(cursor)}` : BASE;
+      return fetch(url).then(r => r.json()).then(resp => {
+        const pagina = resp.data || [];
+        const novoAcumulado = acumulado.concat(pagina);
+        const temMais = resp.meta && resp.meta.hasNextPage && resp.meta.nextCursor && novoAcumulado.length < MAX_PAGINAS * 10;
+        if (temMais) return buscarPagina(resp.meta.nextCursor, novoAcumulado);
+        return novoAcumulado;
+      });
+    };
+
+    return buscarPagina(null, []).then(lista => {
+      this._cacheExerciseDBGratis = lista;
+      return lista;
+    });
+  }
+
+  /**
+   * Busca no ExerciseDB grátis por nome, parte do corpo ou músculo (em inglês)
+   * e devolve até 30 resultados já no formato do nosso catálogo, com o GIF
+   * animado pronto para usar como referência visual do movimento.
+   */
+  buscarExerciseDBGratis(termo) {
+    return this._carregarExerciseDBGratis().then(lista => {
+      const alvo = (termo || '').toLowerCase().trim();
+      const filtrados = !alvo ? lista.slice(0, 30) : lista.filter(ex =>
+        (ex.name || '').toLowerCase().includes(alvo) ||
+        (ex.bodyParts || []).some(p => p.toLowerCase().includes(alvo)) ||
+        (ex.targetMuscles || []).some(m => m.toLowerCase().includes(alvo))
+      ).slice(0, 30);
+
+      return filtrados.map(ex => ({
+        nome: ex.name,
+        grupoMuscular: this._mapearGrupoMuscularEDB(ex.bodyParts, ex.targetMuscles),
+        gifUrl: ex.gifUrl || '',
+        instrucoesOriginais: ex.instructions || []
+      }));
+    });
+  }
+
+  /**
+   * Adiciona ao catálogo do Firebase um exercício vindo do ExerciseDB grátis,
+   * já com o GIF animado (o aluno vê o movimento se mexendo, sem precisar de
+   * link de vídeo colado pelo treinador).
+   */
+  importarExercicioExerciseDBGratis(item) {
+    const id = 'cat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+    const registro = {
+      id,
+      nome: item.nome,
+      grupoMuscular: item.grupoMuscular,
+      videoUrl: '',
+      gifUrl: item.gifUrl || '',
+      fonte: 'exercisedb-gratis'
+    };
+    return this.db.ref('catalogoExercicios/' + id).set(registro).then(() => registro);
+  }
+
   info() {
     console.log('=== SPANCERSKI TRAINER ===');
     console.log('Firebase Database:', firebase.database().ref().toString());
