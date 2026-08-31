@@ -339,7 +339,7 @@ class GerenciadorTreinador {
   }
 
   /**
-   * Carrega logo.jpeg e converte para Base64, para embutir no cabeçalho do PDF.
+   * Carrega logo-transparente.png e converte para Base64, para embutir no cabeçalho do PDF.
    * Se falhar (ex: arquivo não encontrado), resolve com null e o PDF segue sem a imagem.
    */
   _carregarLogoBase64() {
@@ -352,10 +352,10 @@ class GerenciadorTreinador {
           canvas.width = img.width;
           canvas.height = img.height;
           canvas.getContext('2d').drawImage(img, 0, 0);
-          resolve(canvas.toDataURL('image/jpeg', 0.9));
+          resolve(canvas.toDataURL('image/png'));
         };
         img.onerror = () => resolve(null);
-        img.src = 'logo.jpeg';
+        img.src = 'logo-transparente.png';
       } catch (e) {
         resolve(null);
       }
@@ -433,7 +433,7 @@ class GerenciadorTreinador {
     doc.line(0, alturaFaixa, larguraPagina, alturaFaixa);
 
     if (logoBase64) {
-      try { doc.addImage(logoBase64, 'JPEG', margem, 12, 46, 46); } catch (e) { /* segue sem logo */ }
+      try { doc.addImage(logoBase64, 'PNG', margem, 12, 46, 46); } catch (e) { /* segue sem logo */ }
     }
     const xTextoTitulo = logoBase64 ? margem + 58 : margem;
     doc.setFont('times', 'bold');
@@ -768,6 +768,198 @@ class GerenciadorTreinador {
         sessoes.sort((a, b) => new Date(b.data) - new Date(a.data));
         resolve(sessoes);
       }).catch(error => reject(error));
+    });
+  }
+
+  // ========== IMC + RELATÓRIO AUTOMÁTICO DE EVOLUÇÃO ==========
+
+  /**
+   * Calcula o IMC (kg / m²) e devolve também a classificação padrão da OMS.
+   */
+  calcularIMC(pesoKg, alturaCm) {
+    if (!pesoKg || !alturaCm) return null;
+    const alturaM = alturaCm / 100;
+    const imc = pesoKg / (alturaM * alturaM);
+    let classificacao;
+    if (imc < 18.5) classificacao = 'Abaixo do peso';
+    else if (imc < 25) classificacao = 'Peso normal';
+    else if (imc < 30) classificacao = 'Sobrepeso';
+    else if (imc < 35) classificacao = 'Obesidade grau I';
+    else if (imc < 40) classificacao = 'Obesidade grau II';
+    else classificacao = 'Obesidade grau III';
+    return { valor: parseFloat(imc.toFixed(1)), classificacao };
+  }
+
+  /**
+   * Monta o relatório automático de evolução do aluno, cruzando:
+   * - histórico de avaliações de dobras cutâneas (peso, % gordura, massa magra/gorda)
+   * - IMC atual (peso mais recente + altura cadastrada do aluno)
+   * - as duas fotos de evolução mais recentes (para comparação lado a lado)
+   *
+   * É recalculado a cada novo envio de foto ou nova avaliação de dobras,
+   * então sempre reflete a comparação "atual vs. anterior" mais recente.
+   */
+  gerarRelatorioEvolucao(aluno, avaliacoesDobras, fotos) {
+    const avals = [...(avaliacoesDobras || [])].sort((a, b) => new Date(a.data) - new Date(b.data));
+    const atual = avals[avals.length - 1] || null;
+    const anterior = avals.length > 1 ? avals[avals.length - 2] : null;
+
+    const pesoAtual = (atual && atual.entradas.peso) || aluno.peso || null;
+    const alturaAluno = aluno.altura || null;
+    const imc = this.calcularIMC(pesoAtual, alturaAluno);
+
+    const metrica = (chave, unidade, rotulo) => {
+      if (!atual) return null;
+      const valorAtual = chave === 'peso' ? atual.entradas.peso : atual.resultado[chave];
+      if (valorAtual === undefined || valorAtual === null) return null;
+      let diferenca = null, percentual = null, direcao = 'estavel';
+      if (anterior) {
+        const valorAnterior = chave === 'peso' ? anterior.entradas.peso : anterior.resultado[chave];
+        if (valorAnterior !== undefined && valorAnterior !== null) {
+          diferenca = parseFloat((valorAtual - valorAnterior).toFixed(2));
+          percentual = valorAnterior !== 0 ? parseFloat(((diferenca / valorAnterior) * 100).toFixed(1)) : null;
+          direcao = diferenca > 0 ? 'subiu' : diferenca < 0 ? 'desceu' : 'estavel';
+        }
+      }
+      return { rotulo, unidade, atual: valorAtual, diferenca, percentual, direcao };
+    };
+
+    const metricas = {
+      peso: metrica('peso', 'kg', 'Peso'),
+      percentualGordura: metrica('percentualGordura', '%', '% de gordura'),
+      massaMagra: metrica('massaMagra', 'kg', 'Massa magra'),
+      massaGorda: metrica('massaGorda', 'kg', 'Massa gorda')
+    };
+
+    // Série histórica para o gráfico (peso e % gordura ao longo do tempo)
+    const serie = avals.map(a => ({
+      data: a.data,
+      peso: a.entradas.peso,
+      percentualGordura: a.resultado.percentualGordura
+    }));
+
+    // Insights automáticos em linguagem natural
+    const insights = [];
+    if (metricas.peso && metricas.peso.diferenca !== null) {
+      if (metricas.peso.diferenca < 0) insights.push(`Reduziu ${Math.abs(metricas.peso.diferenca)}kg de peso desde a última avaliação.`);
+      else if (metricas.peso.diferenca > 0) insights.push(`Ganhou ${metricas.peso.diferenca}kg de peso desde a última avaliação.`);
+    }
+    if (metricas.percentualGordura && metricas.percentualGordura.diferenca !== null) {
+      if (metricas.percentualGordura.diferenca < 0) insights.push(`Diminuiu ${Math.abs(metricas.percentualGordura.diferenca)}% de gordura corporal — ótima evolução!`);
+      else if (metricas.percentualGordura.diferenca > 0) insights.push(`% de gordura corporal subiu ${metricas.percentualGordura.diferenca}% — vale revisar dieta/treino.`);
+    }
+    if (metricas.massaMagra && metricas.massaMagra.diferenca !== null && metricas.massaMagra.diferenca > 0) {
+      insights.push(`Ganhou ${metricas.massaMagra.diferenca}kg de massa magra.`);
+    }
+    if (imc) insights.push(`IMC atual: ${imc.valor} (${imc.classificacao}).`);
+    if (!atual) insights.push('Cadastre uma avaliação de dobras cutâneas para ver % de gordura, massa magra e o gráfico de evolução.');
+    else if (!anterior) insights.push('Essa é a primeira avaliação registrada — a comparação aparece a partir da segunda.');
+
+    const fotosOrdenadas = [...(fotos || [])].sort((a, b) => new Date(b.data) - new Date(a.data));
+    const fotoAtual = fotosOrdenadas[0] || null;
+    const fotoAnterior = fotosOrdenadas[1] || null;
+
+    return {
+      temComparacao: !!(anterior || (fotoAtual && fotoAnterior)),
+      imc,
+      metricas,
+      serie,
+      insights,
+      fotoAtual,
+      fotoAnterior
+    };
+  }
+
+  // ========== BANCO DE VÍDEOS DE EXERCÍCIOS (catálogo global) ==========
+
+  /**
+   * Extrai o ID de um link do YouTube (várias variações de URL) para gerar
+   * a miniatura e o link de embed. Retorna null se não for um link do YouTube.
+   */
+  extrairIdYoutube(url) {
+    if (!url) return null;
+    const regex = /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/;
+    const m = url.match(regex);
+    return m ? m[1] : null;
+  }
+
+  /**
+   * Devolve uma URL de embed pronta para <iframe>, tanto para YouTube
+   * quanto (sem alteração) para outros links de vídeo direto/Vimeo.
+   */
+  urlEmbedVideo(url) {
+    const idYoutube = this.extrairIdYoutube(url);
+    if (idYoutube) return `https://www.youtube.com/embed/${idYoutube}`;
+    const vimeo = (url || '').match(/vimeo\.com\/(\d+)/);
+    if (vimeo) return `https://player.vimeo.com/video/${vimeo[1]}`;
+    return url;
+  }
+
+  carregarCatalogoExercicios() {
+    return new Promise((resolve, reject) => {
+      this.db.ref('catalogoExercicios').once('value', function (snapshot) {
+        const catalogo = [];
+        snapshot.forEach(function (child) { catalogo.push(child.val()); });
+        catalogo.sort((a, b) => (a.grupoMuscular || '').localeCompare(b.grupoMuscular || '') || a.nome.localeCompare(b.nome));
+        resolve(catalogo);
+      }).catch(error => reject(error));
+    });
+  }
+
+  adicionarExercicioCatalogo(dados) {
+    return new Promise((resolve, reject) => {
+      const id = 'cat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+      const item = {
+        id,
+        nome: dados.nome.trim(),
+        grupoMuscular: dados.grupoMuscular || 'Outros',
+        videoUrl: dados.videoUrl ? dados.videoUrl.trim() : ''
+      };
+      this.db.ref('catalogoExercicios/' + id).set(item)
+        .then(() => resolve(item))
+        .catch(error => reject(error));
+    });
+  }
+
+  atualizarVideoExercicio(id, videoUrl) {
+    return this.db.ref('catalogoExercicios/' + id).update({ videoUrl: videoUrl.trim() });
+  }
+
+  deletarExercicioCatalogo(id) {
+    return this.db.ref('catalogoExercicios/' + id).remove();
+  }
+
+  /**
+   * Preenche o catálogo com uma lista extensa de exercícios comuns (sem vídeo)
+   * na primeira vez que o app é usado, para o treinador já ter o "banco de
+   * movimentos" pronto e só precisar colar o link do vídeo de cada um.
+   * Só roda se o catálogo estiver vazio — nunca sobrescreve dados existentes.
+   */
+  semearCatalogoSeVazio() {
+    return this.carregarCatalogoExercicios().then((catalogo) => {
+      if (catalogo.length > 0) return catalogo;
+
+      const seed = {
+        'Peito': ['Supino Reto', 'Supino Inclinado', 'Supino Declinado', 'Supino com Halteres', 'Crucifixo Reto', 'Crucifixo Inclinado', 'Crossover', 'Peck Deck', 'Flexão de Braço'],
+        'Costas': ['Puxada Frontal', 'Puxada Triângulo', 'Remada Curvada', 'Remada Cavalinho', 'Remada Baixa (Cross Over)', 'Remada Unilateral', 'Pull-down', 'Barra Fixa', 'Pulldown Corda'],
+        'Ombro': ['Desenvolvimento Militar', 'Desenvolvimento com Halteres', 'Elevação Lateral', 'Elevação Frontal', 'Remada Alta', 'Crucifixo Invertido', 'Face Pull', 'Encolhimento de Ombros'],
+        'Bíceps': ['Rosca Direta', 'Rosca Alternada', 'Rosca Martelo', 'Rosca Scott', 'Rosca Concentrada', 'Rosca 21', 'Rosca no Cabo'],
+        'Tríceps': ['Tríceps Corda', 'Tríceps Testa', 'Tríceps Francês', 'Tríceps Coice', 'Mergulho no Banco', 'Tríceps Barra V', 'Supino Fechado'],
+        'Pernas': ['Agachamento Livre', 'Agachamento Smith', 'Agachamento Búlgaro', 'Leg Press 45', 'Cadeira Extensora', 'Mesa Flexora', 'Stiff', 'Levantamento Terra', 'Afundo', 'Passada'],
+        'Glúteos': ['Elevação Pélvica', 'Glúteo no Cross Over', 'Glúteo em Quatro Apoios', 'Abdução de Quadril', 'Cadeira Abdutora'],
+        'Panturrilha': ['Panturrilha em Pé', 'Panturrilha Sentado', 'Panturrilha no Leg Press'],
+        'Abdômen': ['Abdominal Canoa', 'Abdominal Infra', 'Elevação de Pernas', 'Prancha Isométrica', 'Abdominal Oblíquo', 'Abdominal na Polia', 'Rotação de Tronco'],
+        'Cardio / Mobilidade': ['Corrida na Esteira', 'Bike Ergométrica', 'Elíptico', 'Corda Naval', 'Mobilidade de Quadril', 'Alongamento Dinâmico']
+      };
+
+      const promessas = [];
+      Object.entries(seed).forEach(([grupo, exercicios]) => {
+        exercicios.forEach(nome => {
+          promessas.push(this.adicionarExercicioCatalogo({ nome, grupoMuscular: grupo, videoUrl: '' }));
+        });
+      });
+
+      return Promise.all(promessas).then(() => this.carregarCatalogoExercicios());
     });
   }
 

@@ -12,6 +12,7 @@ class AppAluno {
     this.exercicioAtual = 0;
     this.tempoRestante = 0;
     this.intervaloTempo = null;
+    this.catalogoVideos = [];
 
     console.log('✅ App do Aluno carregado!');
     console.log('👤 Aluno ID:', this.alunoId);
@@ -55,16 +56,67 @@ class AppAluno {
       this.db.ref('protocolos/' + this.alunoId).once('value', (snapshot) => {
         this.protocolo = snapshot.val() || {};
         console.log('✅ Protocolo carregado');
-        this.renderizarInterface();
+
+        this.db.ref('catalogoExercicios').once('value', (snapshotCatalogo) => {
+          const catalogo = [];
+          snapshotCatalogo.forEach((child) => catalogo.push(child.val()));
+          this.catalogoVideos = catalogo;
+          this.renderizarInterface();
+        });
       });
     });
+  }
+
+  /**
+   * Procura no catálogo global um exercício com nome igual (ignorando maiúsculas/
+   * acentos/espaços extras) ao exercício do protocolo, e devolve o link do vídeo
+   * cadastrado pelo treinador, se houver.
+   */
+  buscarVideoDoExercicio(nomeExercicio) {
+    const normalizar = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const alvo = normalizar(nomeExercicio);
+    const item = this.catalogoVideos.find(c => normalizar(c.nome) === alvo);
+    return (item && item.videoUrl) ? item.videoUrl : null;
+  }
+
+  urlEmbedVideo(url) {
+    const ytMatch = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
+    if (ytMatch) return `https://www.youtube.com/embed/${ytMatch[1]}`;
+    const vimeoMatch = url.match(/vimeo\.com\/(\d+)/);
+    if (vimeoMatch) return `https://player.vimeo.com/video/${vimeoMatch[1]}`;
+    return url;
+  }
+
+  abrirVideoExercicio(nomeExercicio) {
+    const url = this.buscarVideoDoExercicio(nomeExercicio);
+    if (!url) return;
+    const embed = this.urlEmbedVideo(url);
+
+    const html = `
+      <div class="overlay-modal" id="overlayVideoAluno" onclick="if(event.target===this) appAluno.fecharVideoExercicio()">
+        <div class="modal modal-video">
+          <h2>${nomeExercicio}</h2>
+          <div class="video-wrapper">
+            <iframe src="${embed}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+          </div>
+          <div class="modal-acoes">
+            <button type="button" class="btn-cancelar" onclick="appAluno.fecharVideoExercicio()">Fechar</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', html);
+  }
+
+  fecharVideoExercicio() {
+    document.getElementById('overlayVideoAluno')?.remove();
   }
 
   renderizarInterface() {
     const html = `
       <div class="app-aluno">
         <div class="header-aluno">
-          <img src="logo.jpeg" alt="Spancerski Team" class="logo-aluno" />
+          <img src="logo-transparente.png" alt="Spancerski Team" class="logo-aluno" />
           <div class="saudacao">
             <h1>Olá, <span class="nome-aluno">${this.aluno.nome}</span></h1>
             <p class="data-hoje">${this.formatarData()}</p>
@@ -136,6 +188,7 @@ class AppAluno {
 
         <div class="nome-exercicio">
           <h2>${ex.nome}</h2>
+          ${this.buscarVideoDoExercicio(ex.nome) ? `<button class="btn-ver-video" onclick="appAluno.abrirVideoExercicio('${ex.nome.replace(/'/g, "\\'")}')">▶ Ver vídeo do exercício</button>` : ''}
         </div>
 
         <div class="detalhes-exercicio">

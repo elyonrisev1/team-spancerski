@@ -23,7 +23,10 @@ const estado = {
   semanasMeso: [80, 60, 40],
   execucoes: [],
   avaliacoesDobras: [],
-  fotos: []
+  fotos: [],
+  catalogo: [],
+  buscaCatalogo: '',
+  grupoCatalogoAtivo: 'Todos'
 };
 
 function iniciarDashboard() {
@@ -31,6 +34,13 @@ function iniciarDashboard() {
     estado.alunos = alunos.sort((a, b) => a.nome.localeCompare(b.nome));
     renderizarRail();
     renderizarPainel();
+  });
+
+  // Catálogo de exercícios é global (compartilhado entre todos os alunos).
+  // Semeia a lista inicial só na primeira vez (catálogo vazio) e mantém em cache no estado.
+  trainer.semearCatalogoSeVazio().then((catalogo) => {
+    estado.catalogo = catalogo;
+    if (estado.aba === 'videos') renderizarConteudoAba();
   });
 }
 
@@ -122,6 +132,7 @@ function renderizarPainel() {
       <button class="aba ${estado.aba === 'protocolo' ? 'ativa' : ''}" onclick="trocarAba('protocolo')">Protocolo de treino</button>
       <button class="aba ${estado.aba === 'mesociclo' ? 'ativa' : ''}" onclick="trocarAba('mesociclo')">Mesociclo</button>
       <button class="aba ${estado.aba === 'avaliacao' ? 'ativa' : ''}" onclick="trocarAba('avaliacao')">Avaliação física</button>
+      <button class="aba ${estado.aba === 'videos' ? 'ativa' : ''}" onclick="trocarAba('videos')">Banco de vídeos</button>
       <button class="aba ${estado.aba === 'financeiro' ? 'ativa' : ''}" onclick="trocarAba('financeiro')">Financeiro</button>
     </div>
 
@@ -142,10 +153,12 @@ function renderizarConteudoAba() {
   if (estado.aba === 'protocolo') container.innerHTML = htmlAbaProtocolo();
   else if (estado.aba === 'mesociclo') container.innerHTML = htmlAbaMesociclo();
   else if (estado.aba === 'avaliacao') container.innerHTML = htmlAbaAvaliacao();
+  else if (estado.aba === 'videos') container.innerHTML = htmlAbaVideos();
   else container.innerHTML = htmlAbaFinanceiro();
 
   if (estado.aba === 'avaliacao') {
     document.getElementById('inputFotos')?.addEventListener('change', onSelecionarFotos);
+    renderizarRelatorioEvolucao();
   }
 }
 
@@ -198,7 +211,10 @@ function htmlAbaProtocolo() {
     <form class="form-exercicio" onsubmit="return adicionarExercicioForm(event)">
       <div class="campo">
         <label>Exercício</label>
-        <input type="text" id="fNome" placeholder="Ex: Agachamento livre" required />
+        <input type="text" id="fNome" list="listaCatalogoExercicios" placeholder="Ex: Agachamento livre" required />
+        <datalist id="listaCatalogoExercicios">
+          ${estado.catalogo.map(c => `<option value="${c.nome}"></option>`).join('')}
+        </datalist>
       </div>
       <div class="campo">
         <label>Séries</label>
@@ -475,6 +491,8 @@ function excluirMesociclo(mesoId) {
 
 function htmlAbaAvaliacao() {
   return `
+    <div id="relatorioEvolucaoContainer"></div>
+
     <div class="grid-avaliacao">
       <div>
         <div class="form-dobras">
@@ -517,6 +535,133 @@ function htmlAbaAvaliacao() {
 
         <div class="grid-fotos" id="gridFotos">${htmlGridFotos()}</div>
       </div>
+    </div>
+  `;
+}
+
+// ---------- RELATÓRIO AUTOMÁTICO DE EVOLUÇÃO ----------
+// Gerado sempre que há avaliações de dobras e/ou fotos suficientes para comparar
+// "atual vs. anterior". Roda de novo a cada nova avaliação ou novo envio de foto.
+
+function renderizarRelatorioEvolucao() {
+  const container = document.getElementById('relatorioEvolucaoContainer');
+  if (!container) return;
+
+  const aluno = estado.alunos.find(a => a.id === estado.alunoSelecionadoId);
+  if (!aluno) { container.innerHTML = ''; return; }
+
+  const relatorio = trainer.gerarRelatorioEvolucao(aluno, estado.avaliacoesDobras, estado.fotos);
+  container.innerHTML = htmlRelatorioEvolucao(relatorio);
+}
+
+function htmlRelatorioEvolucao(r) {
+  if (!estado.avaliacoesDobras.length && estado.fotos.length < 2) {
+    return ''; // nada relevante para mostrar ainda
+  }
+
+  const cardsMetricas = Object.values(r.metricas).filter(Boolean).map(m => htmlCardMetrica(m)).join('');
+
+  const cardImc = r.imc ? `
+    <div class="metrica-card">
+      <div class="metrica-label">IMC</div>
+      <div class="metrica-valor">${r.imc.valor}</div>
+      <div class="metrica-delta estavel">${r.imc.classificacao}</div>
+    </div>
+  ` : '';
+
+  const grafico = r.serie.length >= 2 ? svgGraficoEvolucao(r.serie) : `
+    <div class="grafico-vazio">Registre ao menos 2 avaliações de dobras cutâneas para ver o gráfico de evolução de peso e % de gordura.</div>
+  `;
+
+  const fotosComparacao = (r.fotoAtual && r.fotoAnterior) ? `
+    <div class="comparacao-fotos">
+      <div class="foto-comparacao">
+        <img src="${r.fotoAnterior.url}" alt="Foto anterior" />
+        <span>Antes — ${new Date(r.fotoAnterior.data).toLocaleDateString('pt-BR')}</span>
+      </div>
+      <div class="foto-comparacao">
+        <img src="${r.fotoAtual.url}" alt="Foto atual" />
+        <span class="atual">Atual — ${new Date(r.fotoAtual.data).toLocaleDateString('pt-BR')}</span>
+      </div>
+    </div>
+  ` : '';
+
+  return `
+    <div class="relatorio-evolucao">
+      <div class="relatorio-cabecalho">
+        <h3>📊 Relatório automático de evolução</h3>
+        <p class="explicacao">Gerado automaticamente comparando a avaliação/fotos mais recentes com as anteriores.</p>
+      </div>
+
+      <div class="metricas-evolucao">
+        ${cardImc}
+        ${cardsMetricas}
+      </div>
+
+      <div class="grafico-evolucao">${grafico}</div>
+
+      ${fotosComparacao}
+
+      <div class="insights-evolucao">
+        ${r.insights.map(txt => `<div class="insight-item">✓ ${txt}</div>`).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function htmlCardMetrica(m) {
+  const setaMap = { subiu: '↑', desceu: '↓', estavel: '—' };
+  const seta = m.diferenca !== null ? setaMap[m.direcao] : '';
+  const corClasse = m.rotulo === '% de gordura' || m.rotulo === 'Peso' || m.rotulo === 'Massa gorda'
+    ? (m.direcao === 'desceu' ? 'positivo' : m.direcao === 'subiu' ? 'negativo' : 'estavel')
+    : (m.direcao === 'subiu' ? 'positivo' : m.direcao === 'desceu' ? 'negativo' : 'estavel');
+
+  return `
+    <div class="metrica-card">
+      <div class="metrica-label">${m.rotulo}</div>
+      <div class="metrica-valor">${m.atual}<span class="unidade">${m.unidade}</span></div>
+      ${m.diferenca !== null ? `<div class="metrica-delta ${corClasse}">${seta} ${Math.abs(m.diferenca)}${m.unidade}${m.percentual !== null ? ` (${Math.abs(m.percentual)}%)` : ''}</div>` : '<div class="metrica-delta estavel">Primeira medição</div>'}
+    </div>
+  `;
+}
+
+/**
+ * Gera um gráfico de linha simples em SVG puro (sem dependências) plotando
+ * peso (kg) e % de gordura ao longo das avaliações registradas.
+ */
+function svgGraficoEvolucao(serie) {
+  const largura = 640, altura = 220, padding = 36;
+  const pesos = serie.map(p => p.peso).filter(v => v !== undefined && v !== null);
+  const gorduras = serie.map(p => p.percentualGordura).filter(v => v !== undefined && v !== null);
+
+  const minPeso = Math.min(...pesos), maxPeso = Math.max(...pesos);
+  const minGord = Math.min(...gorduras), maxGord = Math.max(...gorduras);
+
+  const escalaX = (i) => padding + (i / (serie.length - 1)) * (largura - padding * 2);
+  const escalaY = (v, min, max) => {
+    if (max === min) return altura / 2;
+    return altura - padding - ((v - min) / (max - min)) * (altura - padding * 2);
+  };
+
+  const pontosPeso = serie.map((p, i) => `${escalaX(i)},${escalaY(p.peso, minPeso, maxPeso)}`).join(' ');
+  const pontosGord = serie.map((p, i) => `${escalaX(i)},${escalaY(p.percentualGordura, minGord, maxGord)}`).join(' ');
+
+  const circulosPeso = serie.map((p, i) => `<circle cx="${escalaX(i)}" cy="${escalaY(p.peso, minPeso, maxPeso)}" r="3.5" fill="var(--accent)" />`).join('');
+  const circulosGord = serie.map((p, i) => `<circle cx="${escalaX(i)}" cy="${escalaY(p.percentualGordura, minGord, maxGord)}" r="3.5" fill="var(--accent-2)" />`).join('');
+
+  const labelsX = serie.map((p, i) => `<text x="${escalaX(i)}" y="${altura - 8}" font-size="9" fill="var(--text-muted)" text-anchor="middle">${new Date(p.data).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</text>`).join('');
+
+  return `
+    <svg viewBox="0 0 ${largura} ${altura}" class="svg-grafico-evolucao" preserveAspectRatio="xMidYMid meet">
+      <polyline points="${pontosPeso}" fill="none" stroke="var(--accent)" stroke-width="2.5" />
+      ${circulosPeso}
+      <polyline points="${pontosGord}" fill="none" stroke="var(--accent-2)" stroke-width="2.5" stroke-dasharray="5,4" />
+      ${circulosGord}
+      ${labelsX}
+    </svg>
+    <div class="legenda-grafico">
+      <span><i style="background:var(--accent)"></i> Peso (kg)</span>
+      <span><i style="background:var(--accent-2)"></i> % Gordura</span>
     </div>
   `;
 }
@@ -577,6 +722,7 @@ function calcularESalvarDobras(event) {
     `;
     estado.avaliacoesDobras.unshift(avaliacao);
     document.querySelector('.historico-avaliacoes').innerHTML = `<h3>Histórico de avaliações</h3>${htmlHistoricoDobras()}`;
+    renderizarRelatorioEvolucao();
   });
 
   return false;
@@ -591,6 +737,9 @@ function onSelecionarFotos(event) {
       estado.fotos = [...novasFotos, ...estado.fotos];
       document.getElementById('gridFotos').innerHTML = htmlGridFotos();
       event.target.value = '';
+      // A(s) foto(s) atual(is) já ficam salvas imediatamente. A partir da 2ª foto
+      // no total, o relatório automático de evolução é gerado/atualizado sozinho.
+      renderizarRelatorioEvolucao();
     })
     .catch(() => {
       alert('Não foi possível enviar a(s) foto(s). Tente uma imagem menor ou verifique sua conexão.');
@@ -604,7 +753,151 @@ function removerFoto(fotoId) {
   trainer.deletarFoto(estado.alunoSelecionadoId, foto).then(() => {
     estado.fotos = estado.fotos.filter(f => f.id !== fotoId);
     document.getElementById('gridFotos').innerHTML = htmlGridFotos();
+    renderizarRelatorioEvolucao();
   });
+}
+
+// ---------- ABA BANCO DE VÍDEOS (catálogo global de exercícios) ----------
+
+function htmlAbaVideos() {
+  const grupos = ['Todos', ...new Set(estado.catalogo.map(c => c.grupoMuscular))];
+  const termo = estado.buscaCatalogo.toLowerCase();
+
+  const filtrados = estado.catalogo.filter(c => {
+    const bateGrupo = estado.grupoCatalogoAtivo === 'Todos' || c.grupoMuscular === estado.grupoCatalogoAtivo;
+    const bateBusca = !termo || c.nome.toLowerCase().includes(termo);
+    return bateGrupo && bateBusca;
+  });
+
+  const pillsGrupo = grupos.map(g => `
+    <button class="dia-pill ${g === estado.grupoCatalogoAtivo ? 'ativo' : ''}" onclick="filtrarGrupoCatalogo('${g.replace(/'/g, "\\'")}')">${g}</button>
+  `).join('');
+
+  const cards = filtrados.length
+    ? filtrados.map(c => htmlCardCatalogo(c)).join('')
+    : `<p style="color:var(--text-muted); font-size:13px;">Nenhum exercício encontrado.</p>`;
+
+  return `
+    <div class="cabecalho-videos">
+      <p class="explicacao">Cole o link do YouTube (ou Vimeo) de cada exercício uma única vez. A partir daí, todo aluno que tiver esse exercício no protocolo já verá o botão "Ver vídeo" automaticamente — o nome do exercício no protocolo precisa ser igual (ou bem parecido) ao nome cadastrado aqui.</p>
+    </div>
+
+    <input type="text" class="busca-aluno" style="margin-bottom:14px; width:100%; max-width:360px;" placeholder="Buscar exercício no catálogo..." value="${estado.buscaCatalogo}" oninput="buscarCatalogo(this.value)" />
+
+    <div class="dias-semana">${pillsGrupo}</div>
+
+    <form class="form-exercicio" style="grid-template-columns: 1.5fr 1fr auto;" onsubmit="return adicionarExercicioCatalogoForm(event)">
+      <div class="campo">
+        <label>Novo exercício</label>
+        <input type="text" id="catNome" placeholder="Ex: Supino Reto" required />
+      </div>
+      <div class="campo">
+        <label>Grupo muscular</label>
+        <input type="text" id="catGrupo" placeholder="Ex: Peito" required />
+      </div>
+      <button type="submit" class="btn-add-ex">+ Adicionar ao catálogo</button>
+    </form>
+
+    <div class="grid-catalogo">${cards}</div>
+  `;
+}
+
+function htmlCardCatalogo(item) {
+  const idYoutube = trainer.extrairIdYoutube(item.videoUrl);
+  const thumb = idYoutube ? `https://img.youtube.com/vi/${idYoutube}/mqdefault.jpg` : null;
+
+  return `
+    <div class="card-catalogo">
+      <div class="thumb-catalogo" ${item.videoUrl ? `onclick="abrirPreviewVideo('${item.id}')" style="cursor:pointer;"` : ''}>
+        ${thumb
+          ? `<img src="${thumb}" alt="${item.nome}" />`
+          : `<div class="thumb-vazia">${item.videoUrl ? '🎬' : 'Sem vídeo'}</div>`
+        }
+        ${item.videoUrl ? '<div class="play-overlay">▶</div>' : ''}
+      </div>
+      <div class="info-catalogo">
+        <div class="grupo-catalogo">${item.grupoMuscular}</div>
+        <div class="nome-catalogo">${item.nome}</div>
+        <form class="form-video-catalogo" onsubmit="return salvarVideoExercicio(event, '${item.id}')">
+          <input type="text" name="videoUrl" placeholder="Colar link do vídeo (YouTube/Vimeo)" value="${item.videoUrl || ''}" />
+          <button type="submit" title="Salvar link">✓</button>
+        </form>
+      </div>
+      <button class="remover-catalogo" onclick="removerExercicioCatalogo('${item.id}')" title="Remover exercício">✕</button>
+    </div>
+  `;
+}
+
+function buscarCatalogo(valor) {
+  estado.buscaCatalogo = valor;
+  renderizarConteudoAba();
+}
+
+function filtrarGrupoCatalogo(grupo) {
+  estado.grupoCatalogoAtivo = grupo;
+  renderizarConteudoAba();
+}
+
+function adicionarExercicioCatalogoForm(event) {
+  event.preventDefault();
+  const nome = document.getElementById('catNome').value.trim();
+  const grupoMuscular = document.getElementById('catGrupo').value.trim();
+  if (!nome) return false;
+
+  trainer.adicionarExercicioCatalogo({ nome, grupoMuscular }).then((item) => {
+    estado.catalogo.push(item);
+    estado.catalogo.sort((a, b) => (a.grupoMuscular || '').localeCompare(b.grupoMuscular || '') || a.nome.localeCompare(b.nome));
+    renderizarConteudoAba();
+  });
+
+  return false;
+}
+
+function salvarVideoExercicio(event, id) {
+  event.preventDefault();
+  const form = event.target;
+  const videoUrl = form.videoUrl.value.trim();
+
+  trainer.atualizarVideoExercicio(id, videoUrl).then(() => {
+    const item = estado.catalogo.find(c => c.id === id);
+    if (item) item.videoUrl = videoUrl;
+    renderizarConteudoAba();
+  });
+
+  return false;
+}
+
+function removerExercicioCatalogo(id) {
+  if (!confirm('Remover este exercício do catálogo de vídeos?')) return;
+  trainer.deletarExercicioCatalogo(id).then(() => {
+    estado.catalogo = estado.catalogo.filter(c => c.id !== id);
+    renderizarConteudoAba();
+  });
+}
+
+function abrirPreviewVideo(id) {
+  const item = estado.catalogo.find(c => c.id === id);
+  if (!item || !item.videoUrl) return;
+  const embed = trainer.urlEmbedVideo(item.videoUrl);
+
+  const html = `
+    <div class="overlay-modal" id="overlayPreviewVideo" onclick="if(event.target===this) fecharPreviewVideo()">
+      <div class="modal modal-video">
+        <h2>${item.nome}</h2>
+        <div class="video-wrapper">
+          <iframe src="${embed}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+        </div>
+        <div class="modal-acoes">
+          <button type="button" class="btn-cancelar" onclick="fecharPreviewVideo()">Fechar</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function fecharPreviewVideo() {
+  document.getElementById('overlayPreviewVideo')?.remove();
 }
 
 // ---------- ABA FINANCEIRO ----------
