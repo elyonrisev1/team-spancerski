@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Team Spancerski — Dashboard</title>
+  <link rel="icon" href="logo.jpeg" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="app-treinador">
+    <aside class="rail">
+      <div class="marca">
+        <img src="logo.jpeg" alt="Spancerski Team" class="logo-marca" />
+        <div class="sub">Dashboard do treinador</div>
+      </div>
+
+      <button class="btn-novo-aluno" onclick="abrirModalNovoAluno()">+ Novo aluno</button>
+
+      <input
+        type="text"
+        id="buscaAluno"
+        class="busca-aluno"
+        placeholder="Buscar aluno..."
+        oninput="renderizarRail()"
+      />
+
+      <div id="listaAlunosRail" class="lista-alunos-rail">
+        <div class="vazio-rail">Carregando alunos...</div>
+      </div>
+    </aside>
+
+    <main class="painel" id="painel">
+      <div class="painel-vazio">
+        <h2>Carregando...</h2>
+      </div>
+    </main>
+  </div>
+
+  <!-- MODAL NOVO ALUNO -->
+  <div class="overlay-modal oculto" id="overlayModal">
+    <div class="modal">
+      <h2>Novo aluno</h2>
+      <form id="formNovoAluno" onsubmit="return criarAlunoForm(event)">
+        <div class="campo">
+          <label>Nome *</label>
+          <input type="text" id="mNome" required />
+        </div>
+        <div class="campo">
+          <label>Idade</label>
+          <input type="number" id="mIdade" min="1" />
+        </div>
+        <div class="campo">
+          <label>Objetivo</label>
+          <input type="text" id="mObjetivo" placeholder="Ex: Hipertrofia" />
+        </div>
+        <div class="campo">
+          <label>Peso (kg)</label>
+          <input type="number" id="mPeso" step="0.1" />
+        </div>
+        <div class="campo">
+          <label>Altura (cm)</label>
+          <input type="number" id="mAltura" />
+        </div>
+        <div class="campo">
+          <label>Telefone (WhatsApp)</label>
+          <input type="text" id="mTelefone" placeholder="11999999999" />
+        </div>
+        <div class="campo">
+          <label>Mensalidade (R$)</label>
+          <input type="number" id="mMensalidade" step="0.01" />
+        </div>
+
+        <div class="modal-acoes">
+          <button type="button" class="btn-cancelar" onclick="fecharModalNovoAluno()">Cancelar</button>
+          <button type="submit" class="btn-confirmar">Cadastrar aluno</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Firebase SDK (Storage removido — fotos agora ficam em Base64 no Realtime Database) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <!-- jsPDF (geração do relatório em PDF) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <script src="firebase-config.js"></script>
+  <script src="trainer.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>
