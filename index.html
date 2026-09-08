@@ -6,6 +6,7 @@
   <title>Team Spancerski — Dashboard</title>
   <link rel="icon" href="logo-transparente.png" />
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="spancerski-features.css" />
 </head>
 <body>
 
@@ -39,40 +40,17 @@
     </main>
   </div>
 
-  <!-- MODAL NOVO ALUNO -->
   <div class="overlay-modal oculto" id="overlayModal">
     <div class="modal">
       <h2>Novo aluno</h2>
       <form id="formNovoAluno" onsubmit="return criarAlunoForm(event)">
-        <div class="campo">
-          <label>Nome *</label>
-          <input type="text" id="mNome" required />
-        </div>
-        <div class="campo">
-          <label>Idade</label>
-          <input type="number" id="mIdade" min="1" />
-        </div>
-        <div class="campo">
-          <label>Objetivo</label>
-          <input type="text" id="mObjetivo" placeholder="Ex: Hipertrofia" />
-        </div>
-        <div class="campo">
-          <label>Peso (kg)</label>
-          <input type="number" id="mPeso" step="0.1" />
-        </div>
-        <div class="campo">
-          <label>Altura (cm)</label>
-          <input type="number" id="mAltura" />
-        </div>
-        <div class="campo">
-          <label>Telefone (WhatsApp)</label>
-          <input type="text" id="mTelefone" placeholder="11999999999" />
-        </div>
-        <div class="campo">
-          <label>Mensalidade (R$)</label>
-          <input type="number" id="mMensalidade" step="0.01" />
-        </div>
-
+        <div class="campo"><label>Nome *</label><input type="text" id="mNome" required /></div>
+        <div class="campo"><label>Idade</label><input type="number" id="mIdade" min="1" /></div>
+        <div class="campo"><label>Objetivo</label><input type="text" id="mObjetivo" placeholder="Ex: Hipertrofia" /></div>
+        <div class="campo"><label>Peso (kg)</label><input type="number" id="mPeso" step="0.1" /></div>
+        <div class="campo"><label>Altura (cm)</label><input type="number" id="mAltura" /></div>
+        <div class="campo"><label>Telefone (WhatsApp)</label><input type="text" id="mTelefone" placeholder="11999999999" /></div>
+        <div class="campo"><label>Mensalidade (R$)</label><input type="number" id="mMensalidade" step="0.01" /></div>
         <div class="modal-acoes">
           <button type="button" class="btn-cancelar" onclick="fecharModalNovoAluno()">Cancelar</button>
           <button type="submit" class="btn-confirmar">Cadastrar aluno</button>
@@ -81,15 +59,25 @@
     </div>
   </div>
 
-  <!-- Firebase SDK (Storage removido — fotos agora ficam em Base64 no Realtime Database) -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
-  <!-- jsPDF (geração do relatório em PDF) -->
+  <!-- Leitura de Word/PDF no navegador -->
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.12.0/mammoth.browser.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
   <script src="firebase-config.js"></script>
   <script src="trainer.js"></script>
+  <!-- Deve ficar depois de trainer.js e antes de dashboard.js -->
+  <script src="spancerski-features.js"></script>
   <script src="dashboard.js"></script>
 </body>
 </html>
