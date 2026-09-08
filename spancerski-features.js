@@ -6,7 +6,7 @@
   'use strict';
 
   // COLOQUE A URL DO SEU CLOUDFLARE WORKER AQUI.
-  const SPANCERSKI_AI_URL = window.SPANCERSKI_AI_URL || 'https://SEU-WORKER.workers.dev';
+  const SPANCERSKI_AI_URL = window.SPANCERSKI_AI_URL || 'https:team-spancerski.edfspancerski.workers.dev';
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({
