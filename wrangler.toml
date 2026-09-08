@@ -1,12 +1,8 @@
 # wrangler.toml
 name = 'team-spancerski'
-[observability.logs]
-enabled = true
-head_sampling_rate = 1
-invocation_logs = true
-persist = true
-
-[observability.traces]
-enabled = true
-head_sampling_rate = 1
-persist = true
+main = "worker.js"
+compatibility_date = "2026-09-08"
+[ai]
+binding = "AI"
+[vars]
+ALLOWED_ORIGINS = "https://elyonrisev1.github.io"
