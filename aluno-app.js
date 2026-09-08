@@ -13,6 +13,11 @@ class AppAluno {
     this.tempoRestante = 0;
     this.intervaloTempo = null;
     this.catalogoVideos = [];
+    this.abaAtual = 'treino'; // treino | evolucao | dieta
+    this.avaliacoesDobras = [];
+    this.lotesFotos = [];
+    this.resumoIA = null;
+    this.dieta = null;
 
     console.log('✅ App do Aluno carregado!');
     console.log('👤 Aluno ID:', this.alunoId);
@@ -61,7 +66,24 @@ class AppAluno {
           const catalogo = [];
           snapshotCatalogo.forEach((child) => catalogo.push(child.val()));
           this.catalogoVideos = catalogo;
-          this.renderizarInterface();
+
+          // Carrega dados de evolução (avaliações, fotos, resumo IA) e dieta em
+          // paralelo, usando as mesmas funções do trainer.js (somente leitura).
+          Promise.all([
+            trainer.carregarAvaliacoesDobras(this.alunoId),
+            trainer.carregarLotesFotos(this.alunoId),
+            trainer.carregarResumoIA(this.alunoId),
+            trainer.carregarDieta(this.alunoId)
+          ]).then(([avaliacoesDobras, lotesFotos, resumoIA, dieta]) => {
+            this.avaliacoesDobras = avaliacoesDobras || [];
+            this.lotesFotos = lotesFotos || [];
+            this.resumoIA = resumoIA || null;
+            this.dieta = dieta || null;
+            this.renderizarInterface();
+          }).catch((erro) => {
+            console.error('❌ Erro ao carregar dados de evolução/dieta:', erro);
+            this.renderizarInterface();
+          });
         });
       });
     });
@@ -69,38 +91,14 @@ class AppAluno {
 
   /**
    * Procura no catálogo global um exercício com nome igual (ignorando maiúsculas/
-   * acentos/espaços extras) ao exercício do protocolo, e devolve o item completo
-   * do catálogo (com videoUrl e/ou imagens de referência), se houver.
+   * acentos/espaços extras) ao exercício do protocolo, e devolve o link do vídeo
+   * cadastrado pelo treinador, se houver.
    */
-  buscarItemCatalogo(nomeExercicio) {
+  buscarVideoDoExercicio(nomeExercicio) {
     const normalizar = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
     const alvo = normalizar(nomeExercicio);
-    return this.catalogoVideos.find(c => normalizar(c.nome) === alvo) || null;
-  }
-
-  buscarVideoDoExercicio(nomeExercicio) {
-    const item = this.buscarItemCatalogo(nomeExercicio);
+    const item = this.catalogoVideos.find(c => normalizar(c.nome) === alvo);
     return (item && item.videoUrl) ? item.videoUrl : null;
-  }
-
-  /**
-   * Mostra, abaixo do nome do exercício, o botão de vídeo (se o treinador já colou
-   * um link) e/ou as fotos de referência do movimento (importadas do free-exercise-db),
-   * para o aluno sempre ter algum apoio visual, mesmo antes de existir um vídeo.
-   */
-  renderizarReferenciaExercicio(nomeExercicio) {
-    const item = this.buscarItemCatalogo(nomeExercicio);
-    if (!item) return '';
-
-    let html = '';
-    if (item.videoUrl) {
-      html += `<button class="btn-ver-video" onclick="appAluno.abrirVideoExercicio('${nomeExercicio.replace(/'/g, "\\'")}')">▶ Ver vídeo do exercício</button>`;
-    } else if (item.gifUrl) {
-      html += `<div class="referencia-imagens"><img src="${item.gifUrl}" alt="Referência: ${nomeExercicio}" loading="lazy" /></div>`;
-    } else if (item.imagens && item.imagens.length) {
-      html += `<div class="referencia-imagens">${item.imagens.slice(0, 2).map(src => `<img src="${src}" alt="Referência: ${nomeExercicio}" />`).join('')}</div>`;
-    }
-    return html;
   }
 
   urlEmbedVideo(url) {
@@ -147,40 +145,16 @@ class AppAluno {
           </div>
         </div>
 
-        <div class="container-treino">
-          <div class="titulo-dia">
-            <h2>${this.diaAtual}</h2>
-          </div>
+        <div class="abas abas-aluno">
+          <button class="aba ${this.abaAtual === 'treino' ? 'ativa' : ''}" onclick="appAluno.trocarAba('treino')">Treino</button>
+          <button class="aba ${this.abaAtual === 'evolucao' ? 'ativa' : ''}" onclick="appAluno.trocarAba('evolucao')">Evolução</button>
+          <button class="aba ${this.abaAtual === 'dieta' ? 'ativa' : ''}" onclick="appAluno.trocarAba('dieta')">Dieta</button>
+        </div>
 
-          <div class="exercicio-ativo" id="exercicioContainer">
-            ${this.renderizarExercicio()}
-          </div>
-
-          <div class="lista-exercicios">
-            <h3>Exercícios do dia</h3>
-            <div id="listaExercicios" class="lista">
-              ${this.renderizarLista()}
-            </div>
-          </div>
-
-          <div class="controles">
-            <button id="btnAnterior" class="btn-controle" onclick="appAluno.anterior()">← Anterior</button>
-            <button id="btnProximo" class="btn-controle" onclick="appAluno.proximo()">Próximo →</button>
-            <button id="btnCronometro" class="btn-cronometro" onclick="appAluno.ativarCronometro()">⏱ Cronômetro</button>
-            <button id="btnFeito" class="btn-feito" onclick="appAluno.marcarFeito()">✓ Série feita</button>
-          </div>
-
-          <div id="cronometro" class="cronometro oculto">
-            <div class="tempo-display">
-              <span id="tempoDisplay">00:00</span>
-            </div>
-            <div class="controles-cronometro">
-              <button onclick="appAluno.iniciarCronometro()">▶ Iniciar</button>
-              <button onclick="appAluno.pausarCronometro()">⏸ Pausar</button>
-              <button onclick="appAluno.reiniciarCronometro()">↺ Reiniciar</button>
-              <button onclick="appAluno.fecharCronometro()">✕ Fechar</button>
-            </div>
-          </div>
+        <div id="conteudoAbaAluno">
+          ${this.abaAtual === 'treino' ? this.renderizarAbaTreino() : ''}
+          ${this.abaAtual === 'evolucao' ? this.renderizarAbaEvolucao() : ''}
+          ${this.abaAtual === 'dieta' ? this.renderizarAbaDieta() : ''}
         </div>
       </div>
     `;
@@ -188,7 +162,155 @@ class AppAluno {
     const appDiv = document.getElementById('app') || document.querySelector('body');
     appDiv.innerHTML = html;
 
-    this.atualizarControles();
+    if (this.abaAtual === 'treino') this.atualizarControles();
+  }
+
+  trocarAba(aba) {
+    this.abaAtual = aba;
+    this.renderizarInterface();
+  }
+
+  renderizarAbaTreino() {
+    return `
+      <div class="container-treino">
+        <div class="titulo-dia">
+          <h2>${this.diaAtual}</h2>
+        </div>
+
+        <div class="exercicio-ativo" id="exercicioContainer">
+          ${this.renderizarExercicio()}
+        </div>
+
+        <div class="lista-exercicios">
+          <h3>Exercícios do dia</h3>
+          <div id="listaExercicios" class="lista">
+            ${this.renderizarLista()}
+          </div>
+        </div>
+
+        <div class="controles">
+          <button id="btnAnterior" class="btn-controle" onclick="appAluno.anterior()">← Anterior</button>
+          <button id="btnProximo" class="btn-controle" onclick="appAluno.proximo()">Próximo →</button>
+          <button id="btnCronometro" class="btn-cronometro" onclick="appAluno.ativarCronometro()">⏱ Cronômetro</button>
+          <button id="btnFeito" class="btn-feito" onclick="appAluno.marcarFeito()">✓ Série feita</button>
+        </div>
+
+        <div id="cronometro" class="cronometro oculto">
+          <div class="tempo-display">
+            <span id="tempoDisplay">00:00</span>
+          </div>
+          <div class="controles-cronometro">
+            <button onclick="appAluno.iniciarCronometro()">▶ Iniciar</button>
+            <button onclick="appAluno.pausarCronometro()">⏸ Pausar</button>
+            <button onclick="appAluno.reiniciarCronometro()">↺ Reiniciar</button>
+            <button onclick="appAluno.fecharCronometro()">✕ Fechar</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Aba "Evolução": mesmas informações do relatório automático do dashboard
+   * (IMC, métricas, gráfico, fotos Antes/Depois por posição e o resumo por
+   * grupamento muscular gerado por IA), só que somente para leitura.
+   */
+  renderizarAbaEvolucao() {
+    const relatorio = trainer.gerarRelatorioEvolucao(this.aluno, this.avaliacoesDobras, this.lotesFotos);
+
+    if (!this.avaliacoesDobras.length && !this.lotesFotos.length) {
+      return `<div class="container-treino"><p class="sem-treino">Seu treinador ainda não registrou avaliações ou fotos de evolução.</p></div>`;
+    }
+
+    const cardsMetricas = Object.values(relatorio.metricas).filter(Boolean).map(m => this.htmlCardMetricaAluno(m)).join('');
+    const cardImc = relatorio.imc ? `
+      <div class="metrica-card">
+        <div class="metrica-label">IMC</div>
+        <div class="metrica-valor">${relatorio.imc.valor}</div>
+        <div class="metrica-delta estavel">${relatorio.imc.classificacao}</div>
+      </div>
+    ` : '';
+
+    const fotosComparacao = this.htmlComparacaoFotosAluno(relatorio);
+
+    const resumoIA = this.resumoIA ? `
+      <div class="bloco-resumo-ia">
+        <h4>Resumo de evolução por grupamento muscular</h4>
+        <div class="resumo-ia-resultado">
+          <div class="resumo-ia-data">Gerado em ${new Date(this.resumoIA.geradoEm).toLocaleString('pt-BR')}</div>
+          <div class="resumo-ia-texto">${this.resumoIA.texto.split('\n').filter(l => l.trim()).map(l => `<p>${l}</p>`).join('')}</div>
+        </div>
+      </div>
+    ` : '';
+
+    return `
+      <div class="container-treino">
+        <div class="relatorio-evolucao">
+          <div class="relatorio-cabecalho">
+            <h3>📊 Sua evolução</h3>
+            <p class="explicacao">Atualizado pelo seu treinador a cada nova avaliação ou conjunto de fotos.</p>
+          </div>
+          <div class="metricas-evolucao">${cardImc}${cardsMetricas}</div>
+          ${fotosComparacao}
+          <div class="insights-evolucao">
+            ${relatorio.insights.map(txt => `<div class="insight-item">✓ ${txt}</div>`).join('')}
+          </div>
+          ${resumoIA}
+        </div>
+      </div>
+    `;
+  }
+
+  htmlCardMetricaAluno(m) {
+    const setaMap = { subiu: '↑', desceu: '↓', estavel: '—' };
+    const seta = m.diferenca !== null ? setaMap[m.direcao] : '';
+    const corClasse = m.rotulo === '% de gordura' || m.rotulo === 'Peso' || m.rotulo === 'Massa gorda'
+      ? (m.direcao === 'desceu' ? 'positivo' : m.direcao === 'subiu' ? 'negativo' : 'estavel')
+      : (m.direcao === 'subiu' ? 'positivo' : m.direcao === 'desceu' ? 'negativo' : 'estavel');
+    return `
+      <div class="metrica-card">
+        <div class="metrica-label">${m.rotulo}</div>
+        <div class="metrica-valor">${m.atual}<span class="unidade">${m.unidade}</span></div>
+        ${m.diferenca !== null ? `<div class="metrica-delta ${corClasse}">${seta} ${Math.abs(m.diferenca)}${m.unidade}</div>` : '<div class="metrica-delta estavel">Primeira medição</div>'}
+      </div>
+    `;
+  }
+
+  htmlComparacaoFotosAluno(r) {
+    if (!r.loteNovo) return '';
+    const posicoes = [...new Set([
+      ...((r.loteAnterior && r.loteAnterior.fotos) || []).map(f => f.posicao),
+      ...(r.loteNovo.fotos || []).map(f => f.posicao)
+    ])];
+
+    const linhas = posicoes.map(pos => {
+      const antes = r.loteAnterior && (r.loteAnterior.fotos || []).find(f => f.posicao === pos);
+      const depois = (r.loteNovo.fotos || []).find(f => f.posicao === pos);
+      return `
+        <div class="par-comparacao-posicao">
+          <div class="rotulo-posicao">${pos}</div>
+          <div class="comparacao-fotos">
+            ${antes ? `<div class="foto-comparacao"><img src="${antes.url}" alt="${pos} antes" /><span>Antes</span></div>` : ''}
+            ${depois ? `<div class="foto-comparacao"><img src="${depois.url}" alt="${pos} ${r.rotuloLoteNovo}" /><span class="atual">${r.rotuloLoteNovo}</span></div>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return `<div class="bloco-comparacao-fotos">${linhas}</div>`;
+  }
+
+  /** Aba "Dieta": mostra o conteúdo completo enviado pelo treinador (Word/PDF). */
+  renderizarAbaDieta() {
+    if (!this.dieta || !this.dieta.html) {
+      return `<div class="container-treino"><p class="sem-treino">Seu treinador ainda não cadastrou sua dieta.</p></div>`;
+    }
+    return `
+      <div class="container-treino">
+        <div class="dieta-meta">Atualizado em ${new Date(this.dieta.atualizadoEm).toLocaleDateString('pt-BR')}</div>
+        <div class="dieta-conteudo">${this.dieta.html}</div>
+      </div>
+    `;
   }
 
   renderizarExercicio() {
@@ -212,7 +334,7 @@ class AppAluno {
 
         <div class="nome-exercicio">
           <h2>${ex.nome}</h2>
-          ${this.renderizarReferenciaExercicio(ex.nome)}
+          ${this.buscarVideoDoExercicio(ex.nome) ? `<button class="btn-ver-video" onclick="appAluno.abrirVideoExercicio('${ex.nome.replace(/'/g, "\\'")}')">▶ Ver vídeo do exercício</button>` : ''}
         </div>
 
         <div class="detalhes-exercicio">

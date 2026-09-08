@@ -23,16 +23,17 @@ const estado = {
   semanasMeso: [80, 60, 40],
   execucoes: [],
   avaliacoesDobras: [],
-  fotos: [],
+  lotesFotos: [],
+  resumoIA: null,
+  dieta: null,
+  fotosSelecionadasLote: {}, // { 'Frente': File, ... } — preenchido antes de enviar o lote
   catalogo: [],
   buscaCatalogo: '',
   grupoCatalogoAtivo: 'Todos',
-  buscaImportacao: '',
-  resultadosImportacao: [],
-  buscaImportacaoEDB: '',
-  resultadosImportacaoEDB: [],
-  telaGlobal: null // null | 'videos' — quando 'videos', mostra o Banco de vídeos sem precisar de um aluno selecionado
+  protocoloImportadoPreview: null // resultado bruto da IA, aguardando confirmação do treinador
 };
+
+const POSICOES_FOTO_UI = ['Frente', 'Costas', 'Lateral Esquerda', 'Lateral Direita'];
 
 function iniciarDashboard() {
   trainer.carregarAlunos().then((alunos) => {
@@ -62,35 +63,20 @@ function renderizarRail() {
   }
 
   lista.innerHTML = filtrados.map(a => `
-    <div class="item-aluno-rail ${a.id === estado.alunoSelecionadoId && !estado.telaGlobal ? 'ativo' : ''}" onclick="selecionarAluno('${a.id}')">
+    <div class="item-aluno-rail ${a.id === estado.alunoSelecionadoId ? 'ativo' : ''}" onclick="selecionarAluno('${a.id}')">
       <div class="nome">${a.nome}</div>
       <div class="status-dot ${a.status === 'Ativo' ? '' : 'inativo'}"></div>
     </div>
   `).join('');
-
-  const btnVideosNav = document.getElementById('btnBancoVideosNav');
-  if (btnVideosNav) btnVideosNav.classList.toggle('ativo', estado.telaGlobal === 'videos');
 }
 
 function selecionarAluno(alunoId) {
-  estado.telaGlobal = null;
   estado.alunoSelecionadoId = alunoId;
   estado.aba = 'protocolo';
   estado.diaAtivo = DIAS_SEMANA[0];
   estado.tecnicasSelecionadas = [];
   renderizarRail();
   carregarDadosDoAluno(alunoId);
-}
-
-/**
- * Abre o Banco de vídeos como tela própria, sem precisar selecionar um aluno —
- * o catálogo é global e compartilhado entre todos os alunos.
- */
-function abrirBancoVideosGlobal() {
-  estado.telaGlobal = 'videos';
-  estado.alunoSelecionadoId = null;
-  renderizarRail();
-  renderizarPainel();
 }
 
 function carregarDadosDoAluno(alunoId) {
@@ -100,14 +86,19 @@ function carregarDadosDoAluno(alunoId) {
     trainer.carregarMesociclos(alunoId),
     trainer.carregarExecucoes(alunoId),
     trainer.carregarAvaliacoesDobras(alunoId),
-    trainer.carregarFotos(alunoId)
-  ]).then(([protocolo, pagamentos, mesociclos, execucoes, avaliacoesDobras, fotos]) => {
+    trainer.carregarLotesFotos(alunoId),
+    trainer.carregarResumoIA(alunoId),
+    trainer.carregarDieta(alunoId)
+  ]).then(([protocolo, pagamentos, mesociclos, execucoes, avaliacoesDobras, lotesFotos, resumoIA, dieta]) => {
     estado.protocolo = protocolo || {};
     estado.pagamentos = pagamentos || {};
     estado.mesociclos = mesociclos || {};
     estado.execucoes = execucoes || [];
     estado.avaliacoesDobras = avaliacoesDobras || [];
-    estado.fotos = fotos || [];
+    estado.lotesFotos = lotesFotos || [];
+    estado.resumoIA = resumoIA || null;
+    estado.dieta = dieta || null;
+    estado.fotosSelecionadasLote = {};
     renderizarPainel();
   });
 }
@@ -116,25 +107,15 @@ function carregarDadosDoAluno(alunoId) {
 
 function renderizarPainel() {
   const painel = document.getElementById('painel');
-
-  // Tela global do Banco de vídeos (não depende de aluno selecionado)
-  if (estado.telaGlobal === 'videos') {
-    painel.innerHTML = `
-      <div class="cabecalho-aluno">
-        <div>
-          <h1>Banco de vídeos</h1>
-          <div class="meta-aluno"><span>Catálogo global — os vídeos cadastrados aqui valem para todos os alunos</span></div>
-        </div>
-      </div>
-      <div id="conteudoAba">${htmlAbaVideos()}</div>
-    `;
-    return;
-  }
-
   const aluno = estado.alunos.find(a => a.id === estado.alunoSelecionadoId);
 
   if (!aluno) {
-    painel.innerHTML = htmlVisaoGeral();
+    painel.innerHTML = `
+      <div class="painel-vazio">
+        <h2>Selecione um aluno</h2>
+        <p>Ou cadastre um novo aluno para começar a montar o treino.</p>
+      </div>
+    `;
     return;
   }
 
@@ -163,6 +144,7 @@ function renderizarPainel() {
       <button class="aba ${estado.aba === 'mesociclo' ? 'ativa' : ''}" onclick="trocarAba('mesociclo')">Mesociclo</button>
       <button class="aba ${estado.aba === 'avaliacao' ? 'ativa' : ''}" onclick="trocarAba('avaliacao')">Avaliação física</button>
       <button class="aba ${estado.aba === 'videos' ? 'ativa' : ''}" onclick="trocarAba('videos')">Banco de vídeos</button>
+      <button class="aba ${estado.aba === 'dieta' ? 'ativa' : ''}" onclick="trocarAba('dieta')">Dieta</button>
       <button class="aba ${estado.aba === 'financeiro' ? 'ativa' : ''}" onclick="trocarAba('financeiro')">Financeiro</button>
     </div>
 
@@ -170,80 +152,6 @@ function renderizarPainel() {
   `;
 
   renderizarConteudoAba();
-}
-
-/**
- * Tela inicial (nenhum aluno selecionado): visão geral do negócio, com KPIs
- * rápidos e os últimos alunos cadastrados — substitui o antigo aviso
- * genérico "Selecione um aluno" por algo útil ao abrir o dashboard.
- */
-function htmlVisaoGeral() {
-  const total = estado.alunos.length;
-  const ativos = estado.alunos.filter(a => a.status === 'Ativo').length;
-  const inativos = total - ativos;
-  const receitaPrevista = estado.alunos
-    .filter(a => a.status === 'Ativo')
-    .reduce((soma, a) => soma + (parseFloat(a.mensalidade) || 0), 0);
-
-  const recentes = [...estado.alunos]
-    .sort((a, b) => new Date(b.dataCadastro || 0) - new Date(a.dataCadastro || 0))
-    .slice(0, 5);
-
-  return `
-    <div class="visao-geral">
-      <div class="boas-vindas">
-        <h1>Visão geral</h1>
-        <p>Selecione um aluno na lista ao lado para montar o treino, ou comece por aqui.</p>
-      </div>
-
-      <div class="grid-kpis">
-        <div class="stat-card">
-          <div class="label">Alunos ativos</div>
-          <div class="valor">${ativos}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Alunos inativos</div>
-          <div class="valor">${inativos}</div>
-        </div>
-        <div class="stat-card pago">
-          <div class="label">Receita mensal prevista</div>
-          <div class="valor">R$ ${receitaPrevista.toFixed(2)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Total de alunos</div>
-          <div class="valor">${total}</div>
-        </div>
-      </div>
-
-      <div class="acesso-rapido">
-        <button class="btn-acao primario" onclick="abrirModalNovoAluno()">+ Novo aluno</button>
-        <button class="btn-acao" onclick="abrirBancoVideosGlobal()">🎬 Banco de vídeos</button>
-      </div>
-
-      ${recentes.length ? `
-      <div class="secao-recentes">
-        <h3>Últimos alunos cadastrados</h3>
-        <div class="lista-recentes">
-          ${recentes.map(a => `
-            <div class="item-recente" onclick="selecionarAluno('${a.id}')">
-              <div class="avatar-inicial">${(a.nome || '?').trim().charAt(0).toUpperCase()}</div>
-              <div class="info-recente">
-                <div class="nome">${a.nome}</div>
-                <div class="sub">${a.objetivo || 'Sem objetivo definido'}</div>
-              </div>
-              <div class="status-dot ${a.status === 'Ativo' ? '' : 'inativo'}"></div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-      ` : `
-      <div class="painel-vazio" style="height:auto; padding:48px 0 0;">
-        <h2>Nenhum aluno cadastrado ainda</h2>
-        <p>Clique em "+ Novo aluno" para começar.</p>
-      </div>
-      `}
-    </div>
-  `;
 }
 
 function trocarAba(aba) {
@@ -258,11 +166,19 @@ function renderizarConteudoAba() {
   else if (estado.aba === 'mesociclo') container.innerHTML = htmlAbaMesociclo();
   else if (estado.aba === 'avaliacao') container.innerHTML = htmlAbaAvaliacao();
   else if (estado.aba === 'videos') container.innerHTML = htmlAbaVideos();
+  else if (estado.aba === 'dieta') container.innerHTML = htmlAbaDieta();
   else container.innerHTML = htmlAbaFinanceiro();
 
   if (estado.aba === 'avaliacao') {
-    document.getElementById('inputFotos')?.addEventListener('change', onSelecionarFotos);
     renderizarRelatorioEvolucao();
+  }
+
+  if (estado.aba === 'protocolo') {
+    document.getElementById('inputImportarProtocolo')?.addEventListener('change', onSelecionarArquivoProtocolo);
+  }
+
+  if (estado.aba === 'dieta') {
+    document.getElementById('inputImportarDieta')?.addEventListener('change', onSelecionarArquivoDieta);
   }
 }
 
@@ -304,6 +220,15 @@ function htmlAbaProtocolo() {
   `).join('');
 
   return `
+    <div class="painel-importar-protocolo">
+      <div>
+        <h3 style="margin:0 0 4px; font-family:var(--font-display); font-size:15px;">Importar protocolo de um arquivo</h3>
+        <p class="explicacao" style="margin:0;">Envie o protocolo em Word (.docx) ou PDF — a IA lê o arquivo e preenche automaticamente exercício, séries, repetições e descanso nos dias da semana. Você confere e confirma antes de salvar.</p>
+      </div>
+      <label class="btn-preset" for="inputImportarProtocolo" style="white-space:nowrap;">📄 Escolher arquivo</label>
+      <input type="file" id="inputImportarProtocolo" accept=".docx,.pdf" style="display:none;" />
+    </div>
+
     <div class="dias-semana">${pills}</div>
 
     <div class="acoes-dia">
@@ -414,6 +339,91 @@ function adicionarExercicioForm(event) {
 
 function removerExercicio(exercicioId) {
   trainer.deletarExercicio(estado.alunoSelecionadoId, estado.diaAtivo, exercicioId).then(() => {
+    carregarDadosDoAluno(estado.alunoSelecionadoId);
+  });
+}
+
+// ---------- IMPORTAR PROTOCOLO DE ARQUIVO (Word/PDF) COM IA ----------
+
+function onSelecionarArquivoProtocolo(event) {
+  const arquivo = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!arquivo) return;
+
+  if (!obterChaveIA()) {
+    alert('Cadastre sua chave de API da Anthropic em "⚙ Configurar IA" (menu à esquerda) antes de importar um protocolo.');
+    return;
+  }
+
+  const rotulo = document.querySelector('label[for="inputImportarProtocolo"]');
+  const textoOriginal = rotulo ? rotulo.textContent : '';
+  if (rotulo) rotulo.textContent = '⏳ Lendo arquivo...';
+
+  trainer.importarProtocoloDeArquivo(arquivo)
+    .then((protocoloEstruturado) => {
+      if (rotulo) rotulo.textContent = textoOriginal;
+      abrirPreviewProtocoloImportado(protocoloEstruturado);
+    })
+    .catch((erro) => {
+      if (rotulo) rotulo.textContent = textoOriginal;
+      alert(erro.message || 'Não foi possível importar esse arquivo.');
+    });
+}
+
+function abrirPreviewProtocoloImportado(protocoloEstruturado) {
+  estado.protocoloImportadoPreview = protocoloEstruturado;
+  const dias = Object.keys(protocoloEstruturado);
+
+  if (!dias.length) {
+    alert('Não encontrei nenhum exercício reconhecível nesse arquivo.');
+    return;
+  }
+
+  const blocos = dias.map(dia => `
+    <div class="preview-dia-importado">
+      <h4>${dia} <span class="contagem">${protocoloEstruturado[dia].length}</span></h4>
+      <table class="tabela-meso">
+        <thead><tr><th>Exercício</th><th>Séries</th><th>Repetições</th><th>Descanso</th><th>Carga</th></tr></thead>
+        <tbody>
+          ${protocoloEstruturado[dia].map(ex => `
+            <tr>
+              <td>${ex.nome}</td>
+              <td>${ex.series}</td>
+              <td>${ex.repeticoes}</td>
+              <td>${ex.descanso}s</td>
+              <td>${ex.carga ? ex.carga + 'kg' : '—'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `).join('');
+
+  const html = `
+    <div class="overlay-modal" id="overlayPreviewProtocolo">
+      <div class="modal modal-execucao">
+        <h2>Conferir protocolo importado</h2>
+        <p class="explicacao" style="margin-top:-10px;">Revise antes de confirmar. Os dias abaixo serão <strong>substituídos</strong> pelo conteúdo importado — dias que não aparecem aqui continuam como estavam.</p>
+        <div class="exec-lista">${blocos}</div>
+        <div class="modal-acoes">
+          <button type="button" class="btn-cancelar" onclick="fecharPreviewProtocoloImportado()">Cancelar</button>
+          <button type="button" class="btn-confirmar" onclick="confirmarProtocoloImportado()">Confirmar e salvar</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function fecharPreviewProtocoloImportado() {
+  document.getElementById('overlayPreviewProtocolo')?.remove();
+  estado.protocoloImportadoPreview = null;
+}
+
+function confirmarProtocoloImportado() {
+  if (!estado.protocoloImportadoPreview) return;
+  trainer.aplicarProtocoloImportado(estado.alunoSelecionadoId, estado.protocoloImportadoPreview).then(() => {
+    fecharPreviewProtocoloImportado();
     carregarDadosDoAluno(estado.alunoSelecionadoId);
   });
 }
@@ -632,15 +642,91 @@ function htmlAbaAvaliacao() {
 
       <div class="painel-fotos">
         <h3>Fotos de evolução</h3>
-        <p class="explicacao">Envie quantas fotos quiser, sem limite — cada uma fica salva com a data do upload, lado a lado com as avaliações de dobras para acompanhar a evolução visual.</p>
+        <p class="explicacao">Envie um conjunto de até 4 fotos (Frente, Costas, Lateral Esquerda, Lateral Direita). O conjunto mais recente aparece como <strong>"Atual"</strong>; a partir do próximo envio, o conjunto anterior vira <strong>"Antes"</strong> e o novo vira <strong>"Depois"</strong>, para comparar lado a lado.</p>
 
-        <label class="input-fotos" for="inputFotos">Clique para enviar fotos (pode selecionar várias de uma vez)</label>
-        <input type="file" id="inputFotos" accept="image/*" multiple style="display:none;" />
+        <div class="grid-slots-fotos" id="gridSlotsFotos">${htmlSlotsNovoLote()}</div>
 
-        <div class="grid-fotos" id="gridFotos">${htmlGridFotos()}</div>
+        <button type="button" class="btn-confirmar" style="width:100%; margin-top:12px;" onclick="enviarLoteFotos()">Enviar conjunto de fotos</button>
+
+        <div id="historicoLotesFotos" class="historico-lotes-fotos">${htmlHistoricoLotes()}</div>
       </div>
     </div>
   `;
+}
+
+function htmlSlotsNovoLote() {
+  return POSICOES_FOTO_UI.map(pos => {
+    const arquivo = estado.fotosSelecionadasLote[pos];
+    return `
+      <label class="slot-foto ${arquivo ? 'preenchido' : ''}" for="slotFoto_${pos.replace(/\s/g, '')}">
+        ${arquivo ? `<img src="${URL.createObjectURL(arquivo)}" alt="${pos}" />` : '<span class="slot-icone">＋</span>'}
+        <span class="slot-legenda">${pos}</span>
+        <input type="file" id="slotFoto_${pos.replace(/\s/g, '')}" accept="image/*" style="display:none;" onchange="onSelecionarSlotFoto('${pos}', this)" />
+      </label>
+    `;
+  }).join('');
+}
+
+function onSelecionarSlotFoto(posicao, input) {
+  const arquivo = input.files && input.files[0];
+  if (!arquivo) return;
+  estado.fotosSelecionadasLote[posicao] = arquivo;
+  document.getElementById('gridSlotsFotos').innerHTML = htmlSlotsNovoLote();
+}
+
+function enviarLoteFotos() {
+  const arquivos = estado.fotosSelecionadasLote;
+  if (!Object.keys(arquivos).length) {
+    alert('Selecione ao menos uma foto (Frente, Costas, Lateral Esquerda ou Lateral Direita) antes de enviar.');
+    return;
+  }
+
+  trainer.uploadLoteFotos(estado.alunoSelecionadoId, arquivos)
+    .then(() => {
+      estado.fotosSelecionadasLote = {};
+      return trainer.carregarLotesFotos(estado.alunoSelecionadoId);
+    })
+    .then((lotes) => {
+      estado.lotesFotos = lotes;
+      document.getElementById('gridSlotsFotos').innerHTML = htmlSlotsNovoLote();
+      document.getElementById('historicoLotesFotos').innerHTML = htmlHistoricoLotes();
+      renderizarRelatorioEvolucao();
+    })
+    .catch(() => {
+      alert('Não foi possível enviar as fotos. Tente imagens menores ou verifique sua conexão.');
+    });
+}
+
+function htmlHistoricoLotes() {
+  if (!estado.lotesFotos.length) {
+    return `<p style="color:var(--text-muted); font-size:13px; margin-top:14px;">Nenhum conjunto de fotos enviado ainda.</p>`;
+  }
+  return `
+    <h4 style="font-size:13px; color:var(--text-muted); margin:18px 0 8px;">Histórico de conjuntos enviados</h4>
+    ${estado.lotesFotos.map((lote, i) => `
+      <div class="lote-historico-item">
+        <div class="lote-historico-cabecalho">
+          <span>${i === 0 ? (estado.lotesFotos.length > 1 ? 'Depois (atual)' : 'Atual') : i === 1 ? 'Antes' : new Date(lote.data).toLocaleDateString('pt-BR')}</span>
+          <span>${new Date(lote.data).toLocaleDateString('pt-BR')}</span>
+          <button class="foto-remover" onclick="removerLoteFotos('${lote.id}')" title="Remover conjunto">✕</button>
+        </div>
+        <div class="lote-historico-fotos">
+          ${(lote.fotos || []).map(f => `<img src="${f.url}" alt="${f.posicao}" title="${f.posicao}" />`).join('')}
+        </div>
+      </div>
+    `).join('')}
+  `;
+}
+
+function removerLoteFotos(loteId) {
+  const lote = estado.lotesFotos.find(l => l.id === loteId);
+  if (!lote || !confirm('Remover este conjunto de fotos?')) return;
+
+  trainer.deletarLoteFotos(estado.alunoSelecionadoId, lote).then(() => {
+    estado.lotesFotos = estado.lotesFotos.filter(l => l.id !== loteId);
+    document.getElementById('historicoLotesFotos').innerHTML = htmlHistoricoLotes();
+    renderizarRelatorioEvolucao();
+  });
 }
 
 // ---------- RELATÓRIO AUTOMÁTICO DE EVOLUÇÃO ----------
@@ -654,12 +740,12 @@ function renderizarRelatorioEvolucao() {
   const aluno = estado.alunos.find(a => a.id === estado.alunoSelecionadoId);
   if (!aluno) { container.innerHTML = ''; return; }
 
-  const relatorio = trainer.gerarRelatorioEvolucao(aluno, estado.avaliacoesDobras, estado.fotos);
+  const relatorio = trainer.gerarRelatorioEvolucao(aluno, estado.avaliacoesDobras, estado.lotesFotos);
   container.innerHTML = htmlRelatorioEvolucao(relatorio);
 }
 
 function htmlRelatorioEvolucao(r) {
-  if (!estado.avaliacoesDobras.length && estado.fotos.length < 2) {
+  if (!estado.avaliacoesDobras.length && !estado.lotesFotos.length) {
     return ''; // nada relevante para mostrar ainda
   }
 
@@ -677,18 +763,7 @@ function htmlRelatorioEvolucao(r) {
     <div class="grafico-vazio">Registre ao menos 2 avaliações de dobras cutâneas para ver o gráfico de evolução de peso e % de gordura.</div>
   `;
 
-  const fotosComparacao = (r.fotoAtual && r.fotoAnterior) ? `
-    <div class="comparacao-fotos">
-      <div class="foto-comparacao">
-        <img src="${r.fotoAnterior.url}" alt="Foto anterior" />
-        <span>Antes — ${new Date(r.fotoAnterior.data).toLocaleDateString('pt-BR')}</span>
-      </div>
-      <div class="foto-comparacao">
-        <img src="${r.fotoAtual.url}" alt="Foto atual" />
-        <span class="atual">Atual — ${new Date(r.fotoAtual.data).toLocaleDateString('pt-BR')}</span>
-      </div>
-    </div>
-  ` : '';
+  const fotosComparacao = htmlComparacaoFotosEvolucao(r);
 
   return `
     <div class="relatorio-evolucao">
@@ -709,8 +784,103 @@ function htmlRelatorioEvolucao(r) {
       <div class="insights-evolucao">
         ${r.insights.map(txt => `<div class="insight-item">✓ ${txt}</div>`).join('')}
       </div>
+
+      <div id="resumoIAContainer">${htmlResumoIA()}</div>
     </div>
   `;
+}
+
+/**
+ * Mostra as fotos do conjunto mais recente (rotulado "Atual" ou "Depois",
+ * conforme o relatório calculado em trainer.js) lado a lado com o conjunto
+ * anterior (rotulado "Antes"), pareadas por posição (Frente com Frente etc.).
+ */
+function htmlComparacaoFotosEvolucao(r) {
+  if (!r.loteNovo) return '';
+
+  const posicoes = [...new Set([
+    ...((r.loteAnterior && r.loteAnterior.fotos) || []).map(f => f.posicao),
+    ...(r.loteNovo.fotos || []).map(f => f.posicao)
+  ])];
+
+  const linhas = posicoes.map(pos => {
+    const antes = r.loteAnterior && (r.loteAnterior.fotos || []).find(f => f.posicao === pos);
+    const depois = (r.loteNovo.fotos || []).find(f => f.posicao === pos);
+    return `
+      <div class="par-comparacao-posicao">
+        <div class="rotulo-posicao">${pos}</div>
+        <div class="comparacao-fotos">
+          ${antes ? `
+            <div class="foto-comparacao">
+              <img src="${antes.url}" alt="${pos} - antes" />
+              <span>Antes — ${new Date(r.loteAnterior.data).toLocaleDateString('pt-BR')}</span>
+            </div>
+          ` : ''}
+          ${depois ? `
+            <div class="foto-comparacao">
+              <img src="${depois.url}" alt="${pos} - ${r.rotuloLoteNovo}" />
+              <span class="atual">${r.rotuloLoteNovo} — ${new Date(r.loteNovo.data).toLocaleDateString('pt-BR')}</span>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `<div class="bloco-comparacao-fotos">${linhas}</div>`;
+}
+
+// ---------- RESUMO DE EVOLUÇÃO POR GRUPAMENTO MUSCULAR (IA) ----------
+
+function htmlResumoIA() {
+  const relatorio = trainer.gerarRelatorioEvolucao(
+    estado.alunos.find(a => a.id === estado.alunoSelecionadoId),
+    estado.avaliacoesDobras,
+    estado.lotesFotos
+  );
+
+  if (!relatorio.loteNovo) return '';
+
+  const botao = `<button type="button" class="btn-acao primario" onclick="gerarResumoIABtn()">🤖 ${estado.resumoIA ? 'Gerar novamente' : 'Gerar resumo por grupamento muscular (IA)'}</button>`;
+
+  const resultado = estado.resumoIA ? `
+    <div class="resumo-ia-resultado">
+      <div class="resumo-ia-data">Gerado em ${new Date(estado.resumoIA.geradoEm).toLocaleString('pt-BR')}</div>
+      <div class="resumo-ia-texto">${estado.resumoIA.texto.split('\n').filter(l => l.trim()).map(l => `<p>${l}</p>`).join('')}</div>
+    </div>
+  ` : '';
+
+  return `
+    <div class="bloco-resumo-ia">
+      <h4>Resumo de evolução por grupamento muscular</h4>
+      <p class="explicacao">A IA compara as fotos e escreve, em texto simples, onde houve evolução e dicas de onde focar a melhoria.</p>
+      <div id="resumoIABotaoContainer">${botao}</div>
+      ${resultado}
+    </div>
+  `;
+}
+
+function gerarResumoIABtn() {
+  if (!obterChaveIA()) {
+    alert('Cadastre sua chave de API da Anthropic em "⚙ Configurar IA" (menu à esquerda) antes de gerar o resumo.');
+    return;
+  }
+
+  const container = document.getElementById('resumoIABotaoContainer');
+  if (container) container.innerHTML = `<button type="button" class="btn-acao primario" disabled>⏳ Analisando fotos...</button>`;
+
+  const aluno = estado.alunos.find(a => a.id === estado.alunoSelecionadoId);
+  const relatorio = trainer.gerarRelatorioEvolucao(aluno, estado.avaliacoesDobras, estado.lotesFotos);
+
+  trainer.gerarResumoEvolucaoIA(estado.alunoSelecionadoId, aluno, relatorio.loteAnterior, relatorio.loteNovo)
+    .then((registro) => {
+      estado.resumoIA = registro;
+      renderizarRelatorioEvolucao();
+    })
+    .catch((erro) => {
+      alert(erro.message || 'Não foi possível gerar o resumo com IA.');
+      renderizarRelatorioEvolucao();
+    });
 }
 
 function htmlCardMetrica(m) {
@@ -782,19 +952,6 @@ function htmlHistoricoDobras() {
   `).join('');
 }
 
-function htmlGridFotos() {
-  if (!estado.fotos.length) {
-    return `<p style="color:var(--text-muted); font-size:13px; grid-column:1/-1;">Nenhuma foto enviada ainda.</p>`;
-  }
-  return estado.fotos.map(f => `
-    <div class="foto-card">
-      <img src="${f.url}" alt="Foto de evolução" />
-      <button class="foto-remover" onclick="removerFoto('${f.id}')" title="Remover">✕</button>
-      <div class="foto-data">${new Date(f.data).toLocaleDateString('pt-BR')}</div>
-    </div>
-  `).join('');
-}
-
 function calcularESalvarDobras(event) {
   event.preventDefault();
 
@@ -832,35 +989,6 @@ function calcularESalvarDobras(event) {
   return false;
 }
 
-function onSelecionarFotos(event) {
-  const arquivos = Array.from(event.target.files || []);
-  if (!arquivos.length) return;
-
-  Promise.all(arquivos.map(arquivo => trainer.uploadFoto(estado.alunoSelecionadoId, arquivo)))
-    .then((novasFotos) => {
-      estado.fotos = [...novasFotos, ...estado.fotos];
-      document.getElementById('gridFotos').innerHTML = htmlGridFotos();
-      event.target.value = '';
-      // A(s) foto(s) atual(is) já ficam salvas imediatamente. A partir da 2ª foto
-      // no total, o relatório automático de evolução é gerado/atualizado sozinho.
-      renderizarRelatorioEvolucao();
-    })
-    .catch(() => {
-      alert('Não foi possível enviar a(s) foto(s). Tente uma imagem menor ou verifique sua conexão.');
-    });
-}
-
-function removerFoto(fotoId) {
-  const foto = estado.fotos.find(f => f.id === fotoId);
-  if (!foto || !confirm('Remover esta foto?')) return;
-
-  trainer.deletarFoto(estado.alunoSelecionadoId, foto).then(() => {
-    estado.fotos = estado.fotos.filter(f => f.id !== fotoId);
-    document.getElementById('gridFotos').innerHTML = htmlGridFotos();
-    renderizarRelatorioEvolucao();
-  });
-}
-
 // ---------- ABA BANCO DE VÍDEOS (catálogo global de exercícios) ----------
 
 function htmlAbaVideos() {
@@ -883,25 +1011,7 @@ function htmlAbaVideos() {
 
   return `
     <div class="cabecalho-videos">
-      <p class="explicacao">Cole o link do YouTube (ou Vimeo) de cada exercício uma única vez. A partir daí, todo aluno que tiver esse exercício no protocolo já verá o botão "Ver vídeo" automaticamente — o nome do exercício no protocolo precisa ser igual (ou bem parecido) ao nome cadastrado aqui. Sem link salvo ainda, use o botão "Buscar vídeo pronto no YouTube" em cada card para achar um vídeo rapidamente.</p>
-    </div>
-
-    <div class="painel-importacao">
-      <h3>Importar exercícios prontos (free-exercise-db — grátis, sem cadastro)</h3>
-      <p class="explicacao">Banco público com 800+ exercícios e fotos de referência do movimento (em inglês). Importe os que quiser — o vídeo continua ficando por sua conta, mas o aluno já vê a foto de referência mesmo antes disso.</p>
-      <div class="linha-importacao">
-        <input type="text" class="busca-aluno" placeholder="Buscar em inglês (ex: squat, bench press, curl...)" value="${estado.buscaImportacao}" oninput="buscarImportacaoFreeDB(this.value)" />
-      </div>
-      <div class="resultados-importacao">${htmlResultadosImportacao()}</div>
-    </div>
-
-    <div class="painel-importacao">
-      <h3>Importar do ExerciseDB grátis (GIF animado do movimento, sem cadastro)</h3>
-      <p class="explicacao">Camada gratuita e sem chave de API do banco ExerciseDB (1.500 exercícios, em inglês). Diferente do banco acima, aqui cada exercício já vem com um <strong>GIF animado</strong> mostrando o movimento — o mais perto de um vídeo pronto que existe hoje sem pagar. É um serviço de terceiros: se um dia sair do ar, os exercícios já importados continuam salvos normalmente.</p>
-      <div class="linha-importacao">
-        <input type="text" class="busca-aluno" placeholder="Buscar em inglês (ex: squat, bench press, curl...)" value="${estado.buscaImportacaoEDB}" oninput="buscarImportacaoEDB(this.value)" />
-      </div>
-      <div class="resultados-importacao-edb">${htmlResultadosImportacaoEDB()}</div>
+      <p class="explicacao">Cole o link do YouTube (ou Vimeo) de cada exercício uma única vez. A partir daí, todo aluno que tiver esse exercício no protocolo já verá o botão "Ver vídeo" automaticamente — o nome do exercício no protocolo precisa ser igual (ou bem parecido) ao nome cadastrado aqui.</p>
     </div>
 
     <input type="text" class="busca-aluno" style="margin-bottom:14px; width:100%; max-width:360px;" placeholder="Buscar exercício no catálogo..." value="${estado.buscaCatalogo}" oninput="buscarCatalogo(this.value)" />
@@ -924,115 +1034,16 @@ function htmlAbaVideos() {
   `;
 }
 
-function htmlResultadosImportacao() {
-  if (!estado.resultadosImportacao.length) {
-    return estado.buscaImportacao
-      ? `<p style="color:var(--text-muted); font-size:12px;">Nenhum resultado. Tente em inglês (squat, curl, press, row...).</p>`
-      : '';
-  }
-  return `<div class="grid-importacao">${estado.resultadosImportacao.map((item, i) => `
-    <div class="card-importacao">
-      ${item.imagens[0] ? `<img src="${item.imagens[0]}" alt="${item.nome}" />` : '<div class="thumb-vazia">Sem foto</div>'}
-      <div class="info-importacao">
-        <div class="grupo-catalogo">${item.grupoMuscular}</div>
-        <div class="nome-catalogo">${item.nome}</div>
-        <button class="btn-add-ex" style="width:100%;" onclick="importarExercicioFreeDB(${i})">+ Importar</button>
-      </div>
-    </div>
-  `).join('')}</div>`;
-}
-
-let _debounceImportacao = null;
-function buscarImportacaoFreeDB(valor) {
-  estado.buscaImportacao = valor;
-  clearTimeout(_debounceImportacao);
-  _debounceImportacao = setTimeout(() => {
-    trainer.buscarFreeExerciseDB(valor).then((resultados) => {
-      estado.resultadosImportacao = resultados;
-      const container = document.querySelector('.resultados-importacao');
-      if (container) container.innerHTML = htmlResultadosImportacao();
-    }).catch(() => {
-      const container = document.querySelector('.resultados-importacao');
-      if (container) container.innerHTML = `<p style="color:var(--danger); font-size:12px;">Não foi possível buscar agora. Verifique sua conexão.</p>`;
-    });
-  }, 400);
-}
-
-function importarExercicioFreeDB(indice) {
-  const item = estado.resultadosImportacao[indice];
-  if (!item) return;
-
-  trainer.importarExercicioFreeDB(item).then((registro) => {
-    estado.catalogo.push(registro);
-    estado.catalogo.sort((a, b) => (a.grupoMuscular || '').localeCompare(b.grupoMuscular || '') || a.nome.localeCompare(b.nome));
-    renderizarConteudoAba();
-  });
-}
-
-// ---------- Importação do ExerciseDB grátis (GIF animado) ----------
-
-function htmlResultadosImportacaoEDB() {
-  if (!estado.resultadosImportacaoEDB.length) {
-    return estado.buscaImportacaoEDB
-      ? `<p style="color:var(--text-muted); font-size:12px;">Nenhum resultado. Tente em inglês (squat, curl, press, row...).</p>`
-      : '';
-  }
-  return `<div class="grid-importacao">${estado.resultadosImportacaoEDB.map((item, i) => `
-    <div class="card-importacao">
-      ${item.gifUrl ? `<img src="${item.gifUrl}" alt="${item.nome}" loading="lazy" />` : '<div class="thumb-vazia">Sem GIF</div>'}
-      <div class="info-importacao">
-        <div class="grupo-catalogo">${item.grupoMuscular}</div>
-        <div class="nome-catalogo">${item.nome}</div>
-        <button class="btn-add-ex" style="width:100%;" onclick="importarExercicioEDB(${i})">+ Importar</button>
-      </div>
-    </div>
-  `).join('')}</div>`;
-}
-
-let _debounceImportacaoEDB = null;
-function buscarImportacaoEDB(valor) {
-  estado.buscaImportacaoEDB = valor;
-  clearTimeout(_debounceImportacaoEDB);
-  _debounceImportacaoEDB = setTimeout(() => {
-    trainer.buscarExerciseDBGratis(valor).then((resultados) => {
-      estado.resultadosImportacaoEDB = resultados;
-      const container = document.querySelector('.resultados-importacao-edb');
-      if (container) container.innerHTML = htmlResultadosImportacaoEDB();
-    }).catch(() => {
-      const container = document.querySelector('.resultados-importacao-edb');
-      if (container) container.innerHTML = `<p style="color:var(--danger); font-size:12px;">Não foi possível buscar agora (o serviço gratuito pode estar fora do ar). Tente de novo em instantes.</p>`;
-    });
-  }, 400);
-}
-
-function importarExercicioEDB(indice) {
-  const item = estado.resultadosImportacaoEDB[indice];
-  if (!item) return;
-
-  trainer.importarExercicioExerciseDBGratis(item).then((registro) => {
-    estado.catalogo.push(registro);
-    estado.catalogo.sort((a, b) => (a.grupoMuscular || '').localeCompare(b.grupoMuscular || '') || a.nome.localeCompare(b.nome));
-    renderizarConteudoAba();
-  });
-}
-
 function htmlCardCatalogo(item) {
   const idYoutube = trainer.extrairIdYoutube(item.videoUrl);
-  const thumbVideo = idYoutube ? `https://img.youtube.com/vi/${idYoutube}/mqdefault.jpg` : null;
-  const thumbGif = (!thumbVideo && item.gifUrl) ? item.gifUrl : null;
-  const thumbImagem = (!thumbVideo && !thumbGif && item.imagens && item.imagens[0]) ? item.imagens[0] : null;
-  const temPreview = !!(item.videoUrl || thumbGif || thumbImagem);
+  const thumb = idYoutube ? `https://img.youtube.com/vi/${idYoutube}/mqdefault.jpg` : null;
 
   return `
     <div class="card-catalogo">
-      <div class="thumb-catalogo" ${temPreview ? `onclick="abrirPreviewVideo('${item.id}')" style="cursor:pointer;"` : ''}>
-        ${thumbVideo
-          ? `<img src="${thumbVideo}" alt="${item.nome}" />`
-          : thumbGif
-            ? `<img src="${thumbGif}" alt="${item.nome}" loading="lazy" />`
-            : thumbImagem
-              ? `<img src="${thumbImagem}" alt="${item.nome}" />`
-              : `<div class="thumb-vazia">Sem vídeo</div>`
+      <div class="thumb-catalogo" ${item.videoUrl ? `onclick="abrirPreviewVideo('${item.id}')" style="cursor:pointer;"` : ''}>
+        ${thumb
+          ? `<img src="${thumb}" alt="${item.nome}" />`
+          : `<div class="thumb-vazia">${item.videoUrl ? '🎬' : 'Sem vídeo'}</div>`
         }
         ${item.videoUrl ? '<div class="play-overlay">▶</div>' : ''}
       </div>
@@ -1043,7 +1054,6 @@ function htmlCardCatalogo(item) {
           <input type="text" name="videoUrl" placeholder="Colar link do vídeo (YouTube/Vimeo)" value="${item.videoUrl || ''}" />
           <button type="submit" title="Salvar link">✓</button>
         </form>
-        <a class="link-buscar-youtube" href="https://www.youtube.com/results?search_query=${encodeURIComponent(item.nome + ' execução técnica')}" target="_blank" rel="noopener">🔎 Buscar vídeo pronto no YouTube</a>
       </div>
       <button class="remover-catalogo" onclick="removerExercicioCatalogo('${item.id}')" title="Remover exercício">✕</button>
     </div>
@@ -1099,25 +1109,16 @@ function removerExercicioCatalogo(id) {
 
 function abrirPreviewVideo(id) {
   const item = estado.catalogo.find(c => c.id === id);
-  if (!item) return;
-
-  let conteudo;
-  if (item.videoUrl) {
-    const embed = trainer.urlEmbedVideo(item.videoUrl);
-    conteudo = `<div class="video-wrapper"><iframe src="${embed}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`;
-  } else if (item.gifUrl) {
-    conteudo = `<div class="galeria-imagens-exercicio"><img src="${item.gifUrl}" alt="${item.nome}" /></div>`;
-  } else if (item.imagens && item.imagens.length) {
-    conteudo = `<div class="galeria-imagens-exercicio">${item.imagens.map(src => `<img src="${src}" alt="${item.nome}" />`).join('')}</div>`;
-  } else {
-    return;
-  }
+  if (!item || !item.videoUrl) return;
+  const embed = trainer.urlEmbedVideo(item.videoUrl);
 
   const html = `
     <div class="overlay-modal" id="overlayPreviewVideo" onclick="if(event.target===this) fecharPreviewVideo()">
       <div class="modal modal-video">
         <h2>${item.nome}</h2>
-        ${conteudo}
+        <div class="video-wrapper">
+          <iframe src="${embed}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+        </div>
         <div class="modal-acoes">
           <button type="button" class="btn-cancelar" onclick="fecharPreviewVideo()">Fechar</button>
         </div>
@@ -1129,6 +1130,64 @@ function abrirPreviewVideo(id) {
 
 function fecharPreviewVideo() {
   document.getElementById('overlayPreviewVideo')?.remove();
+}
+
+// ---------- ABA DIETA (upload de Word/PDF, exibida por completo) ----------
+
+function htmlAbaDieta() {
+  const dieta = estado.dieta;
+
+  return `
+    <div class="painel-dieta">
+      <h3 style="margin:0 0 4px; font-family:var(--font-display); font-size:15px;">Enviar dieta</h3>
+      <p class="explicacao" style="margin:0 0 14px;">Envie a dieta em Word (.docx) ou PDF. O conteúdo completo aparece aqui embaixo e também na tela do aluno (link enviado a ele), sempre com a versão mais recente enviada.</p>
+
+      <label class="btn-preset" for="inputImportarDieta" style="display:inline-block;">📄 ${dieta ? 'Substituir arquivo de dieta' : 'Escolher arquivo de dieta'}</label>
+      <input type="file" id="inputImportarDieta" accept=".docx,.pdf" style="display:none;" />
+      ${dieta ? `<button type="button" class="btn-acao perigo" style="margin-left:10px;" onclick="removerDietaBtn()">Remover dieta</button>` : ''}
+
+      <div id="dietaConteudoContainer">${htmlConteudoDieta()}</div>
+    </div>
+  `;
+}
+
+function htmlConteudoDieta() {
+  const dieta = estado.dieta;
+  if (!dieta || !dieta.html) {
+    return `<p style="color:var(--text-muted); font-size:13px; margin-top:16px;">Nenhuma dieta enviada ainda.</p>`;
+  }
+  return `
+    <div class="dieta-meta">Arquivo: ${dieta.nomeArquivo || '-'} · atualizado em ${new Date(dieta.atualizadoEm).toLocaleString('pt-BR')}</div>
+    <div class="dieta-conteudo">${dieta.html}</div>
+  `;
+}
+
+function onSelecionarArquivoDieta(event) {
+  const arquivo = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!arquivo) return;
+
+  const rotulo = document.querySelector('label[for="inputImportarDieta"]');
+  const textoOriginal = rotulo ? rotulo.textContent : '';
+  if (rotulo) rotulo.textContent = '⏳ Lendo arquivo...';
+
+  trainer.importarDietaDeArquivo(estado.alunoSelecionadoId, arquivo)
+    .then((registro) => {
+      estado.dieta = registro;
+      renderizarConteudoAba();
+    })
+    .catch((erro) => {
+      if (rotulo) rotulo.textContent = textoOriginal;
+      alert(erro.message || 'Não foi possível importar essa dieta.');
+    });
+}
+
+function removerDietaBtn() {
+  if (!confirm('Remover a dieta cadastrada para este aluno?')) return;
+  trainer.deletarDieta(estado.alunoSelecionadoId).then(() => {
+    estado.dieta = null;
+    renderizarConteudoAba();
+  });
 }
 
 // ---------- ABA FINANCEIRO ----------
@@ -1275,3 +1334,29 @@ function criarAlunoForm(event) {
 }
 
 window.addEventListener('load', iniciarDashboard);
+
+// ---------- MODAL CONFIGURAR IA ----------
+
+function abrirModalConfigIA() {
+  document.getElementById('overlayConfigIA').classList.remove('oculto');
+  document.getElementById('iaChaveInput').value = obterChaveIA();
+}
+
+function fecharModalConfigIA() {
+  document.getElementById('overlayConfigIA').classList.add('oculto');
+}
+
+function salvarConfigIAForm(event) {
+  event.preventDefault();
+  const chave = document.getElementById('iaChaveInput').value.trim();
+  salvarChaveIA(chave);
+  fecharModalConfigIA();
+  alert(chave ? 'Chave de API salva neste navegador!' : 'Nenhuma chave foi cadastrada.');
+  return false;
+}
+
+function removerConfigIA() {
+  removerChaveIA();
+  document.getElementById('iaChaveInput').value = '';
+  alert('Chave de API removida deste navegador.');
+}
